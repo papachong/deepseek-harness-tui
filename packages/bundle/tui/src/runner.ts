@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
+import { dryRunCapture } from './capture.ts'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
 const NAME = 'dsh-tui'
@@ -44,10 +45,19 @@ export async function runTui(): Promise<void> {
     : resolveConfigPath(requested, process.env['DSH_SNAPSHOT'])
   if (configPath === undefined || !existsSync(configPath)) {
     process.stderr.write(
-      `usage: ${NAME} <path/to/cordis.yml> (or set DSH_CORDIS_CONFIG=<path>; set DSH_SNAPSHOT=replay for keyless)\n`,
+      `usage: ${NAME} <path/to/cordis.yml> [--resume <sessionId>] (or set DSH_CORDIS_CONFIG=<path>; set DSH_SNAPSHOT=replay for keyless)\n`,
     )
     process.exit(1)
   }
+
+  // --resume <sessionId>: load a persisted cold session and rebuild the agent
+  // on it (mirror api-proxy.ts:1626 `ctx.agents.resume({ resumeSessionId })`).
+  // Absent → fresh session (Phase 1 behavior).
+  const resumeFlag = process.argv.indexOf('--resume')
+  const resumeArg = resumeFlag !== -1 ? process.argv[resumeFlag + 1] : undefined
+  const resumeSessionId = resumeArg !== undefined && resumeArg !== ''
+    ? SessionId(resumeArg)
+    : undefined
 
   // Pause stdin BEFORE boot so a piped writer's data (and its EOF close) is
   // buffered in the stdin internal buffer and not consumed until the readline
@@ -100,17 +110,24 @@ export async function runTui(): Promise<void> {
 
   const selection = defaultModel.currentSelection()
 
-  // Create one agent (headless/src/index.ts:111-119; tui-demo runner.ts:104-112).
-  // provider/model must match a route the config (or replay catalog) claims.
-  const { agent } = await agents.create({
-    sessionId: SessionId(`tui-${process.pid}`),
-    meta: { cwd: process.cwd() },
-    agentOptions: { provider: selection.provider, model: selection.model },
-    setup: (agentCtx: Context) => {
-      const selected: ModelSelectionRef = { current: selection, assembled: undefined }
-      installModelSelection(agentCtx, selected)
-    },
-  })
+  // Create or resume one agent. --resume loads a persisted cold session and
+  // rebuilds the agent on it (mirror api-proxy.ts:1626); absent → fresh session.
+  const setup = (agentCtx: Context) => {
+    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+    installModelSelection(agentCtx, selected)
+  }
+  const { agent } = resumeSessionId === undefined
+    ? await agents.create({
+      sessionId: SessionId(`tui-${process.pid}`),
+      meta: { cwd: process.cwd() },
+      agentOptions: { provider: selection.provider, model: selection.model },
+      setup,
+    })
+    : await agents.resume({
+      resumeSessionId,
+      agentOptions: { provider: selection.provider, model: selection.model },
+      setup,
+    })
 
   // Subscribe BEFORE the loop so no event is missed (tui-demo runner.ts:114-125).
   // session/event: (Session, SessionEvent) => void (session/src/index.ts:76).
@@ -164,6 +181,11 @@ export async function runTui(): Promise<void> {
     exitCode = 1
     process.stderr.write(`${NAME}: ${error instanceof Error ? error.message : String(error)}\n`)
   } finally {
+    // SessionEnd capture hook (Phase 3, M2 partial): a dry-run intent only.
+    // The real `sf memory capture` reuses ai-cli's redaction/queue/replay
+    // out-of-tree; it is NOT invoked until the user confirms (solution note
+    // risk #4: any capture must not bypass ai-cli idempotence).
+    dryRunCapture(agent.session)
     disposeEvent()
     disposeStatus()
     disposeApproval()

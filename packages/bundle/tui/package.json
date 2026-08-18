@@ -33,6 +33,10 @@
       "types": "./lib/types/answerers.d.ts",
       "default": "./lib/answerers.js"
     },
+    "./capture": {
+      "types": "./lib/types/capture.d.ts",
+      "default": "./lib/capture.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -42,6 +46,7 @@
     "lib/runner.js",
     "lib/answerers.js",
     "lib/bin.js",
+    "lib/capture.js",
     "lib/render/ansi.js",
     "lib/render/markdown.js",
     "lib/render/cards.js",

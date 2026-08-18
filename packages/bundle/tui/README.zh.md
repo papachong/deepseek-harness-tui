@@ -24,5 +24,6 @@ stdin 每行承载一个任务（管道或键入）。bin 在 boot 前暂停 std
 
 - **原始 stdout，非终端渲染器**——流式文本与 `[tool/call]`/`[tool/result]` 行直接经 `process.stdout.write` 写出；无 ANSI SGR、无 markdown 折叠、无 card 组件、无 diff/todo/plan 渲染。渲染层（pi-tui 移植 + `presentation.ts` card 分派）是 Phase 2。
 - **行模式 stdin，非 raw-mode**——`terminal: !isTTY ? false : true` readline；无单键审批（y/n 需 `<enter>`）、无按键处理、无 autocomplete、无 slash-commands。raw-mode 键盘输入是 Phase 2。
-- **无 `--resume`**——bin 每次运行创建新 session；无前序 session 的 JSONL 重建。`--resume` 是 Phase 3。
+- **`--resume` 已支持**——`dsh-tui <config> --resume <sessionId>` 从 JSONL 重建冷会话并恢复 agent（镜像 api-proxy.ts:1626 的 `ctx.agents.resume`）；残留：replay fixture 与恢复会话的 turn-cursor 交互是测试数据限制，非 --resume 机制缺陷。
 - **answerer 是行模式且阻塞 turn**——审批/ask-user answerer 从共享 stdin 读整行；在 warp session-share 下，`SharedSessionWriteToLongRunningCommands` 可能 gate 此行为，需改非阻塞 answerer（见[分析 note](../../../.agents/notes/proposed/architecture/2026-08-18-tui-terminal-product-analysis.md) §8）。
+- **采集仅为 dry-run**——SessionEnd 钩子向 stderr 记录采集意图；真实 `sf memory capture` 延后到用户确认（Phase 3 风险 #4：必须复用 ai-cli 的脱敏/幂等）。
