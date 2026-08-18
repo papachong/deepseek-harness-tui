@@ -222,7 +222,7 @@ BFF 额外红利——host 算好的 `ToolEventView`：`viewFor(...)`（`api-pro
 - typecheck：111 tsc 错，分类：33× TS2339（`ctx.llm/sessions/commands/tools/tokenMeter/agents/userQuestions/systemPrompt` 不在 `Context` 上——declaration-merge 断）、48× TS7006（implicit any，下游连锁）、13× TS2345（EventMap 名字漂移如 `llm/adapters-updated`/`commands/change`）、其余 pi-tui API。
 - 40 快照 0/40 全挂，但**同一根因**：`TypeError: installAgentLlmTarget is not a function at createTuiChat (index.ts:592)`——harness setup 在挂载前抛，**根本没到渲染/快照比对**。渲染层 drift 仍未知。
 
-决定性阻断点：`installAgentLlmTarget` 是被删的 core seam。`packages/core/agent/src/llm-target.ts` **在当前树已不存在**。前任 TUI `index.ts:592` 调的 `installAgentLlmTarget(agent.ctx, target)` 是该文件导出——一个交互式模型选择耦合机制：把可变 provider/model/reasoning 强度路由挂到 agent 的 `system-prompt/assemble` + `agent/request` waterfall，让 front door（TUI）能在 step 间切模型。**删除 TUI 时 core 侧配套删除了这个交互 seam**，Web BFF 用了另一套模型选择路径替代。
+决定性阻断点：`installAgentLlmTarget` 是被删的 core seam。`dsh-agent` 里原先的 `llm-target.ts` **在当前树已不存在**。前任 TUI `index.ts:592` 调的 `installAgentLlmTarget(agent.ctx, target)` 是该文件导出——一个交互式模型选择耦合机制：把可变 provider/model/reasoning 强度路由挂到 agent 的 `system-prompt/assemble` + `agent/request` waterfall，让 front door（TUI）能在 step 间切模型。**删除 TUI 时 core 侧配套删除了这个交互 seam**，Web BFF 用了另一套模型选择路径替代。
 
 这**不是包改名级机械 drift，是一个交互 seam 从 core 被移除**。恢复 TUI 要么 (a) 把 `llm-target.ts` 恢复进 core（**违反下方不碰 core 约束**），要么 (b) 把 TUI 的 model-controller 重写到 Web BFF 现在用的模型选择路径（等于重写关键交互层）。
 
