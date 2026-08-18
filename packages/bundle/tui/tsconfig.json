@@ -13,6 +13,7 @@
     { "path": "../../boot/app-boot" },
     { "path": "../../core/agent" },
     { "path": "../../core/agent-default-model" },
+    { "path": "../../core/tools" },
     { "path": "../../llm/llm" },
     { "path": "../../core/session" },
     { "path": "../../interaction/user-approval" },

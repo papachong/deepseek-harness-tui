@@ -42,11 +42,21 @@
     "lib/runner.js",
     "lib/answerers.js",
     "lib/bin.js",
+    "lib/render/ansi.js",
+    "lib/render/markdown.js",
+    "lib/render/cards.js",
+    "lib/render/projections.js",
+    "lib/transport/event-source.js",
+    "lib/transport/session-event.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-app-boot": "workspace:^"
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
+    "anser": "^2.3.5",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -55,6 +65,7 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
     "@deepseek-ai/dsh-user-questions": "workspace:^"
   },
@@ -65,7 +76,9 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
-    "@deepseek-ai/dsh-user-questions": "workspace:^"
+    "@deepseek-ai/dsh-user-questions": "workspace:^",
+    "@types/mdast": "^4.0.4"
   }
 }
