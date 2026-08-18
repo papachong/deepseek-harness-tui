@@ -223,28 +223,53 @@ deepseek-harness 当前是**纯 headless / automation / web 驱动**的产品，
 | 远程瘦 client | BFF SSE（`EventSource` + `POST /api/respond`） | HTTP/SSE + host-computed `view` |
 | warp 内 | 终端字节流（无 transport） | PTY 字节 + `BlockAssembler` |
 
-## 11. Phase 0 原型验证结果（已验证）
+## 11. Phase 0 原型验证 + 前任 TUI 恢复性审计结果
+
+### 11.1 Phase 0 原型（已验证）
 
 `packages/examples/tui-demo/`（`@deepseek-ai/dsh-tui-demo`，分支 `phase0/tui-prototype`）已实现并 keyless 跑通：
 
 - **8 文件**：`package.json`、`tsconfig.json`、`src/{index,invariant,bin,runner}.ts`、`cordis.yml`、`cordis.snapshot.yml`。
 - **verified: true**：in-process `ctx.on('session/event')` + `ctx.on('agent/status')` 订阅 → 终端渲染管道跑通。
-- **实测输出**（bash-tool fixture）：
-  ```
-  task> [agent:running]
-  [tokens: in=123 out=89]
-  [tool/call] bash({"command":"echo dsh-sdk-proof-7391",...})
-  [tool/result] [ok] dsh-sdk-sdk-proof-7391
-  dsh-sdk-proof-7391
-  [turn/end] completed
-  [agent:idle]
-  ```
-  text-turn fixture 纯流式也渲染成功。
+- **实测输出**（bash-tool fixture）：`task> [agent:running]` → `[tool/call] bash(...)` → `[tool/result] [ok] ...` → `[turn/end] completed` → `[agent:idle]`。text-turn fixture 纯流式也渲染成功。
 - **keyless**：`DSH_SNAPSHOT=replay` + `cordis.snapshot.yml`（llm-replay + committed fixture），不需 `DEEPSEEK_API_KEY`。
-- **修复了两个真实 bug**（原型验证价值）：(1) stdin 须在 `boot()` 前读以缓冲（piped stdin 立即关闭 write end，readline 后附会丢行）；(2) `rl.close()` 不能在 line handler 内调（同步 close 事件下 tick 覆盖 line 的 `resolve(l)`，须 close 在 promise resolve 后）。
-- **复现**：`node --import tsx/esm packages/examples/tui-demo/src/bin.ts`（需 Node v22+，`fnm use 22`）。
+- **修复了两个真实 bug**：(1) stdin 须在 `boot()` 前读以缓冲；(2) `rl.close()` 不能在 line handler 内调（同步 close 事件下 tick 覆盖 `resolve(l)`）。
+- **复现**：`node --import tsx/esm packages/examples/tui-demo/src/bin.ts`（需 Node v22+）。
 
-**结论**：方案落地性已验证。事件流→终端渲染、keyless 运行、stdin 驱动 turn 三条路径均通。
+**结论**：in-process `session/event` → 终端渲染、keyless、stdin 驱动 turn 三条路径均通。
+
+### 11.2 前任 TUI 恢复性审计（决定性，推翻 greenfield 假设）
+
+仓库**曾有完整 `@deepseek-ai/dsh-tui` v0.0.1**，住 `packages/ui/tui/`（84 文件，src 7676 行 + tests 10321 行 + 40 个 `terminal.expected.txt` 渲染快照）+ `apps/cli/`（`src/tui.ts`、`config/tui.cordis.yml`、`src/tui-onboarding/`、`tests/pty-harness.ts`）。commit `10bb9cbf4a`（2026-08-04）"cleanup: remove TUI package and legacy dsh entrypoints" 一次性删除，同日归档 114 份设计 note。
+
+**移除理由（已查清）**：非技术债，是 pre-release stance（CLAUDE.md "Pre-release stance: foundation over blast radius"）下把未对外的 surface 移出首 RC（`dsh-v0.1.0-rc.7` 在删除后 13 天打）。删除当天 10:06 还在 merge PR #1359 `perf/tui-long-session-render`，13:20 整体删——是被判定"未达 RC-ready"而移出 blast radius，不是失败。
+
+**前任 TUI 实物**：渲染器 `@earendil-works/pi-tui`（npm 仍在线，0.84.2，前任用 0.80.7）。模块结构：`src/{runtime,prompt,config,index,invariant}.ts` + `chat/`（autocomplete/channel/file-autocomplete/model-command/questions/resume/skill-invocation/timing/tokens）+ `components/`（content/dialogs/text/theme/transcript/xml-tool-output）+ `extension/`（overlay-manager/types，即 `ctx.tui.openOverlay()` FIFO 仲裁器）。40 个快照含逐像素 SGR 规格如 `terminal 96x36 buffer=normal` + 每行 `style N-M fg=bright-magenta bold underline`——**重建的确定验收标准**。
+
+### 11.3 恢复性 drift 审计结果（RED，但根因单一且非渲染层）
+
+把 `git checkout 10bb9cbf4a^ -- packages/ui/tui/ apps/cli/...` 拉回工作树，跑 Map→Fix→Verify 三阶段审计：
+
+- **Fix 已做的机械 rename（12 文件，tui 侧）**：`dsh-compact→dsh-compaction`、`dsh-user-interaction→dsh-user-questions`、`UserInteractionError→UserQuestionError`、`UserInteractionService→UserQuestionService`、`ctx.userInteraction→ctx.userQuestions`、`COMPACT_CHECKPOINT_SOURCE→compactCheckpointSource(CompactionId())`、pi-tui 0.80.7→0.84.2、`TUI→TuiMainScreen`、`@cordisjs/plugin-loader→@deepseek-ai/cordis-plugin-loader`、tsconfig 路径修正。**pnpm install 通过**。
+- **typecheck**：111 tsc 错，分类：33× TS2339（`ctx.llm/sessions/commands/tools/tokenMeter/agents/userQuestions/systemPrompt` 不在 `Context` 上——declaration-merge 断）、48× TS7006（implicit any，下游连锁）、13× TS2345（EventMap 名字漂移如 `llm/adapters-updated`/`commands/change`）、其余 pi-tui API。
+- **40 快照 0/40 全挂**，但**同一根因**：`TypeError: installAgentLlmTarget is not a function at createTuiChat (index.ts:592)`——harness setup 在挂载前抛，**根本没到渲染/快照比对**。渲染层 drift 仍未知。
+
+### 11.4 决定性阻断点：`installAgentLlmTarget` 是被删的 core seam
+
+`packages/core/agent/src/llm-target.ts` **在当前树已不存在**。前任 TUI `index.ts:592` 调的 `installAgentLlmTarget(agent.ctx, target)` 是该文件导出——一个交互式模型选择耦合机制：把可变 provider/model 路由挂到 agent 的 `system-prompt/assemble` + `agent/request` waterfall，让 front door（TUI）能在 step 间切模型。**删除 TUI 时 core 侧配套删除了这个交互 seam**，Web BFF 用了另一套模型选择路径替代。
+
+这**不是包改名级机械 drift，是一个交互 seam 从 core 被移除**。恢复 TUI 要么 (a) 把 `llm-target.ts` 恢复进 core（**违反 §14 不改 core**），要么 (b) 把 TUI 的 model-controller 重写到 Web BFF 现在用的模型选择路径（等于重写关键交互层）。
+
+### 11.5 最终判定：以删除产物为规格重建，不机械恢复
+
+基于 11.2-11.4 全部证据：**不机械恢复前任 TUI**。理由：
+1. `installAgentLlmTarget` seam 已从 core 删除，恢复必须碰 core 或重写 model-controller（前者违反 §14，后者等于重写交互层）。
+2. 33 个 Context declaration-merge + 13 EventMap 名字是系统性机械工作，可做但 model-controller seam 仍缺。
+3. 40 快照从未真正测过渲染层（全挂 setup），恢复成本不可预测。
+
+**正确路径**：把删除的 TUI（84 文件 + 40 快照 + 114 归档 note）当**规格与参考实现**，而非 base。以已验证的 Phase 0 `tui-demo`（in-process `session/event` 管道通）为起点，按 40 快照的逐像素规格重建渲染层，model-controller 走当前 core 的路径（不复活 `installAgentLlmTarget`）。这正契合 §14 的"纯加法新包，不碰 core"。
+
+`★ Insight`：`llm-target.ts` 随 TUI 一起删，印证了一个架构事实——dsh 的"交互 front door 用的 core seam"与 TUI **共生**：TUI 删时 core 也删了它的专有入口。这是 pre-release stance 的激进面："foundation over blast radius"不仅删未对外 surface，还删了只服务它的 core 接口。重建因此必须走当前 core 现有 seam（Web BFF 的模型选择路径），不能复活被删 seam。`★`
 
 ## 12. 改造路线图
 
@@ -298,7 +323,7 @@ deepseek-harness 是开源项目，终端化改造须**最小化对跟随 upstre
 ## 15. 风险与决策点
 
 1. **远程 transport 选型**：**已定 BFF SSE，Phase 2 只做 BFF，SDK 延后**。源码级验证：BFF mux 流已闭环 approval/ask-user（`approval/requested`/`question/requested` + `POST /api/respond`），SDK 是 "dead capability"（server 从不 `transport.request`，`FakeTransport` 断言锁死，client 无 `onRequest`）。保留双 transport adapter 架构，后续自动化场景再接 SDK。
-2. **渲染栈选型**：ink（复用 React 组件，引入 React 运行时于终端）vs 纯 Node TUI 库（移植纯逻辑更轻但重写组件）。建议先 ink 原型最大化复用，稳定后评估去 React。
+2. **渲染栈选型**：前任 TUI 用 `@earendil-works/pi-tui`（npm 0.84.2 在线，前任 0.80.7），有先例。Phase 2 评估 pi-tui 作为首选（其 `TUI`→`TuiMainScreen` API 已漂移，需对账）；40 个 `terminal.expected.txt` 逐像素快照是重建的确定验收标准。**不再从 ink/纯 Node 二选一**——有先例可循。
 3. **warp 审批门控**：`SharedSessionWriteToLongRunningCommands` 是否覆盖 dsh 阻塞式审批 readline，需实测；不行则 answerer 改非阻塞。
 4. **记忆双权威边界**：dsh 只做 `ai-cli` 角色 + recall consumer，治理闭环归 SF 四仓；任何采集必须复用 `sf memory capture`，不绕过 ai-cli 的脱敏/幂等/SDK child guard。
 5. **Agent Note 合规**：合并需双语 + `verify-doc-budgets` + 配套 keyless snapshot（`CLAUDE.md` testing policy）。
