@@ -1,334 +1,274 @@
-# TUI 终端形态产品改造技术分析
+# Agent Note: Terminal product form for deepseek-harness (TUI)
 
-> 状态：提案（proposed）。目标：将 deepseek-harness 改造为类似 Claude Code CLI 的 TUI 终端产品。本报告基于对 `packages/` 源码、`/data/AI_Dev/warp`、`/data/AI_Dev/sf/ai-hub`、SF 记忆方案的源码级调查，结论附 `file:line` 引用。合并前需按 [dsh-doc-standards](.agents/skills/dsh-doc-standards/SKILL.md) 做双语与预算处理。
->
-> 修订记录（2026-08-18）：纳入 warp session-share 调查、SF 松耦合约束、保留独立远程开发能力约束、记忆方案分阶段接入、upstream 跟随策略、Phase 0 原型验证结果。
+Status: proposed
 
-## 1. 核心结论
+English | [中文](2026-08-18-tui-terminal-product-analysis.zh.md)
 
-deepseek-harness 当前是**纯 headless / automation / web 驱动**的产品，**仓库内不存在任何 TUI 代码**（全仓 `package.json` 搜 `ink`/`blessed`/`inquirer`/`prompts`/`terminal-kit` 零命中）。但架构已为 TUI 留好接入点：
+## Problem
 
-- **launcher 已预留 `tui` profile**：`apps/cli/reference/README.md:46-48` 把 `dsh --profile tui --resume <id>` 列为未来 surface，`apps/cli/src/args.ts:10` 注释明确"第一个不识别的 token 之后属于被启动 app"，但 `packages/boot/app-boot/src/profile.ts:121` 的 `PROFILE_TEMPLATES` 只有 `web`/`headless`。接入点已就绪，只差一个 bundle。
-- **spine 是事件溯源的**：agent-loop 把每个事实（token delta、tool call、approval）写入 `SessionEventMap`（`packages/core/session/src/types.ts:236`），UI 是观察者。"model-visible ⟺ logged" 不变量（`docs/architecture.md:96`）保证 TUI 可从 live 流或 JSONL 日志完整重建 transcript。
-- **render intent 已是纯数据**：`packages/core/tools/src/presentation.ts` 的 `card` 标签联合体 provider 中立、replay-safe、discriminated，TUI 直接消费。
-- **MCP client 已存在**：`packages/mcp/mcp-client`（`@modelcontextprotocol/sdk` ^1.12.0）连外部 MCP server 并把 tools 注册到 `ctx.tools`——松耦合接 SF 的现成基础。
-- **Phase 0 已验证**：`packages/examples/tui-demo/`（`@deepseek-ai/dsh-tui-demo`）standalone bin，keyless via llm-replay，实测 `verified: true`——in-process `session/event` → 终端渲染管道跑通（流式 token + tool call/result 行）。
+deepseek-harness ships three surfaces today — headless one-shot, the Web browser app, and ACP/JSON-RPC automation — and **none of them is a TUI**. A full-repo search for `ink`/`blessed`/`inquirer`/`prompts`/`terminal-kit` in `package.json` files returns zero hits, and a search for `createInterface`/`setRawMode`/`isTTY`/`readline`/`process.stdin.on('data'|'keypress')` hits nothing on any production path (the only `process.stdin` uses are `packages/examples/acp-demo/src/bin.ts:31` and `packages/examples/jsonrpc-demo/src/runner.ts:51`, both EOF-driven protocol servers, not keypress readers).
 
-**改造性质 = 补一个 bundle + 终端渲染层 + 可选远程 client transport，不动 `agent-loop`**（遵守 `CLAUDE.md` "Plugins, not loop changes"）。
+Yet the architecture has left TUI entry points in place:
 
-## 2. 形态目标：三模式并存（类比 Claude Code）
+- **The launcher reserves a `tui` profile.** `apps/cli/reference/README.md:46-48` lists `dsh --profile tui --resume <id>` as a future surface, and `packages/boot/app-boot/src/profile.ts:121` (`PROFILE_TEMPLATES`) currently defines only `web`/`headless`. The seam exists; only the bundle is missing.
+- **The spine is event-sourced.** `agent-loop` writes every fact (token delta, tool call, approval) to `SessionEventMap` (`packages/core/session/src/types.ts:236`); the UI is an observer. The "model-visible ⟺ logged" invariant (`docs/architecture.md:96`) guarantees a TUI can rebuild a full transcript from either the live stream or the JSONL log.
+- **Render intent is already pure data.** The `card` discriminated-union provider in `packages/core/tools/src/presentation.ts` is provider-neutral, replay-safe, and discriminated; a TUI consumes it directly.
+- **An MCP client already exists.** `packages/mcp/mcp-client` (`@modelcontextprotocol/sdk` ^1.12.0) connects external MCP servers and registers their tools on `ctx.tools` — the ready base for loose coupling to an external memory platform.
+- **Phase 0 is verified.** `packages/examples/tui-demo/` (`@deepseek-ai/dsh-tui-demo`) is a standalone bin, keyless via llm-replay, with `verified: true` — the in-process `session/event` → terminal render pipeline runs (streaming tokens + tool call/result lines).
 
-约束：dsh TUI 与 warp/SF **松耦合**（类比 CC ↔ warp/SF，靠 CLAUDE.md/MCP/CLI/Agent/Skills/Rules/hook 关联），且**保留独立远程开发能力**（脱离 warp/SF 仍可本地或 webUI 式与服务端交互）。
+The change is therefore **add a bundle + a terminal render layer + an optional remote client transport, without touching `agent-loop`** (honoring the `CLAUDE.md` rule "Plugins, not loop changes").
 
-| 模式 | agent 跑在哪 | TUI 角色 | 脱离 warp/SF | 远程 | 协作来源 |
+## Proposal
+
+### Three modes coexist (analogous to Claude Code)
+
+Constraint: the dsh TUI stays **loosely coupled** to warp/SF (like CC ↔ warp/SF, related through CLAUDE.md/MCP/CLI/Agent/Skills/Rules/hooks) and **retains independent remote-development capability** (it still works locally or webUI-style against a server without warp/SF).
+
+| Mode | agent runs on | TUI role | without warp/SF | remote | collaboration source |
 |---|---|---|---|---|---|
-| **本地 in-process** `dsh-tui-demo`（Phase 0 已验证）/ `dsh --profile tui` | 本地 | 本地 agent + 本地 TUI | ✅ | 本地 | — |
-| **远程瘦 client** `dsh --profile tui --remote <url>` | 服务端 | HTTP/SSE client 连 dsh Web BFF | ✅ | ✅ | — |
-| **warp 内** TUI 跑在 warp | 本地 | 本地 agent，终端字节流共享 | 依赖 warp | 本地+共享 | warp session share |
+| **Local in-process** `dsh-tui-demo` (Phase 0 verified) / `dsh --profile tui` | local | local agent + local TUI | ✅ | local | — |
+| **Remote thin client** `dsh --profile tui --remote <url>` | server | HTTP/SSE client to the dsh Web BFF | ✅ | ✅ | — |
+| **Inside warp** TUI runs in warp | local | local agent, terminal byte stream shared | depends on warp | local+shared | warp session share |
 
-**关键**：约束 2 要的"保留服务端"= 保留 dsh 自己的 Web BFF（`packages/bundle/web-app` 的 `dsh-host-apiproxy`）并让 TUI 当它的 client，**不新建服务端**。BFF 已逐字转发 `session/event` + `approval/requested` + `question/requested`（浏览器是它的现成 client）。
+The "retain a server" constraint means **keep dsh's own Web BFF** (`packages/bundle/web-app`'s `dsh-host-apiproxy`) and make the TUI a client of it, **not build a new server**. The BFF already forwards `session/event` + `approval/requested` + `question/requested` verbatim (the browser is its existing client).
 
-## 3. 现状：三面墙，无一 TTY
+### Current state: three walls, no TTY
 
-| Surface | 传输 | 形态 | file:line |
+| Surface | transport | form | file:line |
 |---|---|---|---|
-| Headless 一次性 | in-process | 取最后非空 assistant 文本写 stdout，exit 0/1，无流式 | `packages/bundle/headless/src/index.ts:129-133` |
-| Web 浏览器 | HTTP/SSE | React 18 app，完整事件回放 | `packages/bundle/web-app/src/index.ts`；`packages/client/web-react/package.json:31` |
-| ACP stdio | JSON-RPC stdio | automation-only，剥离 live progress/reasoning/tool/plan/title | `packages/acp/acp/README.md:7,78,80` |
-| JSON-RPC SDK | stdio JSON-RPC | 逐字转发 `session.event`，3 请求 + 4 通知 | `packages/sdk/server/src/server.ts:53-240` |
+| Headless one-shot | in-process | writes the last non-empty assistant text to stdout, exit 0/1, no streaming | `packages/bundle/headless/src/index.ts:129-133` |
+| Web browser | HTTP/SSE | React 18 app, full event replay | `packages/bundle/web-app/src/index.ts`; `packages/client/web-react/package.json:31` |
+| ACP stdio | JSON-RPC stdio | automation-only, strips live progress/reasoning/tool/plan/title | `packages/acp/acp/README.md:7,78,80` |
+| JSON-RPC SDK | stdio JSON-RPC | forwards `session.event` verbatim, 3 requests + 4 notifications | `packages/sdk/server/src/server.ts:53-240` |
 
-证据：全仓搜 `createInterface`/`setRawMode`/`isTTY`/`readline`/`process.stdin.on('data'|'keypress')` 在生产路径零命中——唯一 `process.stdin` 用法是 `packages/examples/acp-demo/src/bin.ts:31` 与 `packages/examples/jsonrpc-demo/src/runner.ts:51` 的 `on('end')`（EOF 驱动协议服务器，非按键）。TUI 的 stdin raw-mode 读取是**全新代码**（Phase 0 已验证可行性）。
+### Minimal program surface the TUI must wrap
 
-## 4. 传输层选型
+**Type spine:**
 
-| 候选 | 评价 | 结论 |
+- `Agent` interface — `packages/core/agent/src/runtime-types.ts:64-144`: `id`, `options`, `session`, `inbox`, `status`, `followup`, `steer`, `inject`, `cancel`, `whenIdle`.
+- `AgentLoop` — `packages/core/agent-loop/src/index.ts:296`, `static inject = ['agents','sessions','llm','tools','systemPrompt']`.
+- `AgentRegistry.create(options)` — `packages/core/agent/src/index.ts:405`.
+- `Session.append(type, data, ...opts)` — `packages/core/session/src/index.ts:604`, the only legal event write point.
+- `SessionEventMap` — `packages/core/session/src/types.ts:236-335` (merge-extensible).
+
+**One turn's execution trace:** `ReactLoopAgent` (`packages/core/agent-loop/src/agent.ts:64`): `ctx.agents.create` → `agent.followup(msg)` → `wakeDriver` → `kick()` (`:210`, `while(await this.turn())`) → `turn()` (`:246`, `turn/start`) → each step: `preStep` (`:225`, claim inbox, assemble system prompt, `agent/pre-step` waterfall) → `buildRequest` (`:407`, frozen config) → `step()` (`:332`, `llm.stream` → append `assistant/chunk` per chunk, `BlockAssembler` folds, `finish` appends `assistant/message`) → `executeToolCalls` (`packages/core/agent-loop/src/tool-calls.ts:59`, append `tool/call`+`tool/result`) → `step/end` → `agent/turn-stopping` may `steer` → `turn/end`. `kick` exits → `agent/status{idle}` → `whenIdle()` resolves. Caller reference `packages/bundle/headless/src/index.ts:111-134`; Phase 0 `packages/examples/tui-demo/src/runner.ts` reuses this flow.
+
+**Event firehose (TUI render source):** `session/event` (`packages/core/session/src/index.ts:641-647`) carries each `SessionEvent` verbatim:
+
+| event.type | use | file:line |
 |---|---|---|
-| **in-process `ctx.agents`**（本地模式） | 直接拿 `approval/request`/`user-questions` seam，零协议开销 | 本地模式用（Phase 0 已验证） |
-| **dsh Web BFF HTTP/SSE**（远程模式） | 逐字转发 `session/event`，`approval/requested`/`question/requested` 已在 wire，TUI 回 `POST /api/respond` | **远程模式已定**（见 §10） |
-| JSON-RPC SDK server（远程模式） | 逐字转发 `session.event`，但 approval 的 server→client request **未实现**（"dead capability"） | 延后（见 §10） |
-| ACP | automation-only，剥离 live progress，fresh-session-only | 不选（`README.md:7,78,80`） |
-| Remote BFF / Typert | 远程多租户，Typert 是类型图注册非 client transport | 不选 |
+| `assistant/chunk` | token-level stream (`text-delta`/`reasoning-delta`/`tool-call-delta`/`usage`/`finish`) | `types.ts:266`; `packages/llm/llm/src/types.ts:312-330` |
+| `assistant/message` | folded full assistant message + usage | `types.ts:273` |
+| `tool/call` / `tool/result` | tool call/result (`meta` carries replayable projection) | `types.ts:279,291-297` |
+| `todo/write` | todo full snapshot (last-write-wins) | `types.ts:299` |
+| `turn/start\|end` / `step/start\|end` | structural boundary | `types.ts:243-256` |
+| `approval/asked\|decided\|policy` | audit (log-only, not in model transcript) | `packages/interaction/user-approval/src/index.ts:34-73` |
+| `agent/inbox/spliced` | inbox change (steering source) | `packages/core/agent/src/types.ts:19` |
 
-## 5. 核心 spine：TUI 要包裹的最小程序面
+`assistant/chunk` is the raw token delta, persisted verbatim — TUI streaming render and log replay share one path. Phase 0 measured: `BlockAssembler` (`packages/llm/llm/src/assembler.ts`) folds chunks into visible text, `tool/call`+`tool/result` render as `[tool/call]`/`[tool/result]` lines.
 
-### 5.1 类型 spine
+### Render layer: gaps and reuse
 
-- `Agent` 接口 — `packages/core/agent/src/runtime-types.ts:64-144`：`id`、`options`、`session`、`inbox`、`status`、`followup`、`steer`、`inject`、`cancel`、`whenIdle`。
-- `AgentLoop` — `packages/core/agent-loop/src/index.ts:296`，`static inject = ['agents','sessions','llm','tools','systemPrompt']`。
-- `AgentRegistry.create(options)` — `packages/core/agent/src/index.ts:405`。
-- `Session.append(type, data, ...opts)` — `packages/core/session/src/index.ts:604`，唯一合法事件写入点。
-- `SessionEventMap` — `packages/core/session/src/types.ts:236-335`（merge-extensible）。
+Existing render primitives are all React/DOM: `packages/client/ui-primitives/package.json:29-50` pulls `anser` (ANSI SGR parse), `shiki` (syntax highlight), `mdast-util-*` (GFM+math), `katex`, `react`/`react-dom`.
 
-### 5.2 一轮 turn 的执行轨迹
+High-value reuse candidates (pure logic, portable):
 
-`ReactLoopAgent`（`packages/core/agent-loop/src/agent.ts:64`）：`ctx.agents.create` → `agent.followup(msg)` → `wakeDriver` → `kick()`（`:210`，`while(await this.turn())`）→ `turn()`（`:246`，`turn/start`）→ 每 step：`preStep`（`:225`，claim inbox、assemble system prompt、`agent/pre-step` waterfall）→ `buildRequest`（`:407`，frozen config）→ `step()`（`:332`，`llm.stream` → 逐 chunk append `assistant/chunk`，`BlockAssembler` 折叠，`finish` append `assistant/message`）→ `executeToolCalls`（`packages/core/agent-loop/src/tool-calls.ts:59`，append `tool/call`+`tool/result`）→ `step/end` → `agent/turn-stopping` 可 `steer` → `turn/end`。`kick` 退出 → `agent/status{idle}` → `whenIdle()` resolve。参考 caller `packages/bundle/headless/src/index.ts:111-134`；Phase 0 `packages/examples/tui-demo/src/runner.ts` 已复用此流程。
-
-### 5.3 事件火带（TUI 渲染源）
-
-`session/event`（`packages/core/session/src/index.ts:641-647`）逐字携带每个 `SessionEvent`：
-
-| event.type | 用途 | file:line |
+| module | value | file:line |
 |---|---|---|
-| `assistant/chunk` | token 级流式（`text-delta`/`reasoning-delta`/`tool-call-delta`/`usage`/`finish`） | `types.ts:266`；`packages/llm/llm/src/types.ts:312-330` |
-| `assistant/message` | 折叠后完整 assistant 消息 + usage | `types.ts:273` |
-| `tool/call` / `tool/result` | 工具调用/结果（`meta` 携带可重放投影） | `types.ts:279,291-297` |
-| `todo/write` | todo 全量快照（last-write-wins） | `types.ts:299` |
-| `turn/start\|end` / `step/start\|end` | 结构边界 | `types.ts:243-256` |
-| `approval/asked\|decided\|policy` | 审计（log-only，不进 model transcript） | `packages/interaction/user-approval/src/index.ts:34-73` |
-| `agent/inbox/spliced` | inbox 变更（steering 来源） | `packages/core/agent/src/types.ts:19` |
+| `ansi.ts` | full ANSI SGR parse + cursor-movement replay + wide chars + theme token map | `packages/client/ui-primitives/src/ansi.ts:1-447` |
+| `markdown/incremental.ts` | streaming append-only markdown parse, O(1)/chunk | `packages/client/ui-primitives/src/markdown/incremental.ts` |
+| `markdown/parse.ts` | GFM+math grammars | same directory |
+| `markdown/plain-text.ts` | plain-text extraction | same directory |
 
-`assistant/chunk` 是原始 token delta，逐字持久化——TUI 流式渲染与日志重放走同一路径。Phase 0 已实测：`BlockAssembler`（`packages/llm/llm/src/assembler.ts`）折叠 chunk 为可见文本，`tool/call`+`tool/result` 渲染为 `[tool/call]`/`[tool/result]` 行。
+Gap vs Claude Code TUI:
 
-## 6. 渲染层：差距与复用
-
-### 6.1 现有渲染原语全是 React/DOM
-
-`packages/client/ui-primitives/package.json:29-50`：`anser`（ANSI SGR 解析）、`shiki`（同步语法高亮）、`mdast-util-*`（GFM+math）、`katex`、`react`/`react-dom`。
-
-### 6.2 高价值复用候选（纯逻辑可移植）
-
-| 模块 | 价值 | file:line |
+| Claude Code TUI capability | dsh current state | change |
 |---|---|---|
-| `ansi.ts` | 完整 ANSI SGR 解析 + 光标移动回放 + 宽字符 + 主题 token 映射 | `packages/client/ui-primitives/src/ansi.ts:1-447` |
-| `markdown/incremental.ts` | 流式 append-only markdown 解析，O(1)/chunk | `packages/client/ui-primitives/src/markdown/incremental.ts` |
-| `markdown/parse.ts` | GFM+math 两条文法 | 同目录 |
-| `markdown/plain-text.ts` | 纯文本抽取 | 同目录 |
+| streaming markdown | `IncrementalMarkdownParser` exists but is bound to React | bind a terminal markdown renderer |
+| tool approval card | `ApprovalService` seam-only, fail-closed | TUI registers an answerer |
+| todo panel | `todo/write` projection exists | read the `sessionProjections` `todos` key, terminal sidebar |
+| plan mode | `plan` projection + `exit_plan_mode` + `plan-review` intent | consume `plan` projection + special render intent |
+| diff view | `DiffBlock.tsx` React, `DiffHunk` pure data | terminal diff renderer (greenfield) |
+| slash-commands | `CommandRuntime` extensible, `/permission` `/compact` `/plan` `/goal` `/feedback` `/export-log` registered | build autocomplete over `list(agent)` |
+| keyboard input | zero TTY code | `setRawMode` + readline/keypress (Phase 0 verified the stdin path) |
 
-### 6.3 Gap vs Claude Code TUI
+Render intent is already a pure data contract: `packages/core/tools/src/presentation.ts` defines `ToolCallView` (`:46`) / `ToolResultView` (`:140`). The `ToolDefinition` hooks `presentCall?`/`presentResult?` (`packages/core/tools/src/index.ts:271-287`) are **pure functions** (`docs/cookbook/adding-a-tool.md:84-88`). The TUI dispatches on the `card` discriminant.
 
-| Claude Code TUI 能力 | dsh 现状 | 改造 |
-|---|---|---|
-| 流式 markdown | `IncrementalMarkdownParser` 存在但绑 React | 绑终端 markdown 渲染器 |
-| 工具审批卡片 | `ApprovalService` seam-only，fail-closed | TUI 注册 answerer |
-| todo 面板 | `todo/write` projection 存在 | 读 `sessionProjections` 的 `todos` key，终端侧栏 |
-| plan 模式 | `plan` projection + `exit_plan_mode` + `plan-review` intent | 消费 `plan` projection + 特殊渲染 intent |
-| diff 视图 | `DiffBlock.tsx` React，`DiffHunk` 纯数据 | 终端 diff 渲染器（greenfield） |
-| slash-commands | `CommandRuntime` 可扩展，已注册 `/permission` `/compact` `/plan` `/goal` `/feedback` `/export-log` | 自建 autocomplete over `list(agent)` |
-| 键盘输入 | 零 TTY 代码 | `setRawMode` + readline/keypress（Phase 0 已验证 stdin 路径） |
+Per-tool render intent: bash→`terminal`, write/edit→`diff`, read→`read`, grep/glob→`search`, web→`web`, exit_plan_mode→`generic`(plan), todo_write→projection (not a card). todo/plan-mode are session projections (`todos`/`plan`), consumed via `sessionProjections`.
 
-### 6.4 render intent 已是纯数据契约
+TUI-owned session-context duties: `TerminalCallView.cwd` relative-path resolution (`presentation.ts:96-99`), `ReadResultView.path` relativization (`:285`), bash exit-code parse (`packages/shell/tool-bash/src/render.ts:103`), spill file (`tool-bash/src/index.ts:166-181`).
 
-`packages/core/tools/src/presentation.ts`：`ToolCallView`（`:46`）/ `ToolResultView`（`:140`）。`ToolDefinition` 钩子 `presentCall?`/`presentResult?`（`packages/core/tools/src/index.ts:271-287`）是**纯函数**（`docs/cookbook/adding-a-tool.md:84-88`）。TUI 按 `card` discriminant 分派。
+### Interaction loop: approval / ask-user / commands
 
-各工具 render intent：bash→`terminal`、write/edit→`diff`、read→`read`、grep/glob→`search`、web→`web`、exit_plan_mode→`generic`(plan)、todo_write→projection（非 card）。todo/plan-mode 是 session projection（`todos`/`plan`），通过 `sessionProjections` 消费。
+**Approval** (fail-closed, the TUI must register an answerer): `ApprovalService` (`packages/interaction/user-approval/src/index.ts:192`), `ApprovalPolicy='ask'|'never'` (`:94`), no answerer returns `'unavailable'` (`:309-329`). `ApprovalOutcome='allowed-once'|'rejected'|'cancelled'|'unavailable'` (`types.ts:29`). The answerer is an `approval/request` waterfall listener that **must call `next()`**. The only production answerer is the Web BFF (`api-proxy.ts:1391-1450`). The TUI must register an answerer. Reference `api-proxy.ts:1391-1450` and `acp/src/index.ts:271-289`.
 
-### 6.5 TUI owns 的会话上下文职责
+**ask-user** (provider-only): `UserQuestionService` (`packages/interaction/user-questions/src/index.ts:38`), `registerProvider` (`:64`), no provider throws `NO_PROVIDER`. `intent:'plan-review'` (`types.ts:23-32`). The TUI must `registerProvider`; `plan-review` gets special rendering.
 
-`TerminalCallView.cwd` 相对路径解析（`presentation.ts:96-99`）、`ReadResultView.path` 相对化（`:285`）、bash 退出码解析（`packages/shell/tool-bash/src/render.ts:103`）、spill file（`tool-bash/src/index.ts:166-181`）。
+**slash-commands** (extensible): `CommandRuntime` (`packages/interaction/commands/src/index.ts:225`), per-agent `ScopedLayers`. `register` (`:245`), `execute` (`:297`), `list` (`:260`). The TUI builds its own autocomplete.
 
-## 7. 交互闭环：审批 / ask-user / commands
+**terminal package** (not a TUI host): `packages/terminal/` is an agent-driven persistent-PTY capability (`terminal/src/index.ts:105`), per-agent, audited, sandbox-fenced. It provides a pty, not a canvas. TUI reuse: consume the pty output stream (like the Web client's `bash-sample.tsx` but with a terminal renderer), or register a new `TerminalBackend`.
 
-### 7.1 审批（fail-closed，必须 TUI 注册 answerer）
+### warp session-share: the realtime collaboration layer (external, uncoupled)
 
-`ApprovalService`（`packages/interaction/user-approval/src/index.ts:192`），`ApprovalPolicy='ask'|'never'`（`:94`），无 answerer 返回 `'unavailable'`（`:309-329`）。`ApprovalOutcome='allowed-once'|'rejected'|'cancelled'|'unavailable'`（`types.ts:29`）。answerer 是 `approval/request` waterfall listener，**必须调 `next()`**。唯一 production answerer = Web BFF（`api-proxy.ts:1391-1450`）。TUI 必须注册 answerer。参考 `api-proxy.ts:1391-1450` 与 `acp/src/index.ts:271-289`。
+Investigation of `/data/AI_Dev/warp` + `/data/AI_Dev/sf/ai-hub` concludes:
 
-### 7.2 ask-user（provider-only）
+- **Terminal-stream-level sharing (tmux-style):** PTY bytes are the render-output source of truth, relayed through a server (ai-hub Socket.IO, production `wss://sessions.app.warp.dev`, OSS patches 0001/0006 repoint to ai-hub).
+- **Viewer can input:** `WriteToPty` bytes land verbatim on the sharer's PTY master fd, traced to `local_tty/event_loop.rs:289 self.pty.writer().write(bytes)` — the same path as a local keypress. Gating: `SharedSessionWriteToLongRunningCommands` + long-running block + Executor role.
+- **Running CC/dsh inside warp:** what is shared is the TUI's **terminal render bytes + keypress stream**, not app-level structured sharing.
+- **Hybrid model:** PTY bytes = render truth; app-level sideband events layered above (`CommandExecutionStarted/Finished` with `participant_id`+AI metadata, `AgentResponseEvent`, CRDT `InputUpdate`, initial `Scrollback`).
 
-`UserQuestionService`（`packages/interaction/user-questions/src/index.ts:38`），`registerProvider`（`:64`），无 provider 抛 `NO_PROVIDER`。`intent:'plan-review'`（`types.ts:23-32`）。TUI 必须 `registerProvider`，`plan-review` 特殊渲染。
+Impact on the dsh TUI:
 
-### 7.3 slash-commands（可扩展）
+- **No collaboration code to write:** the dsh TUI running in warp gets terminal-stream sharing + approval collaboration for free (the approval answerer reads stdin keypresses; warp writes the viewer's keypresses verbatim to the same PTY stdin → the viewer can answer the approval card directly).
+- **Sidesteps the SDK approval gap:** in warp mode, approval goes through PTY stdin, not the SDK wire.
+- **Gating risk:** warp viewer writes are gated on `SharedSessionWriteToLongRunningCommands` + the long-running block. Whether dsh's blocking approval readline is judged long-running needs measurement — if not, the answerer must become non-blocking or carry an explicit long-running marker.
+- **Historical clue:** `DiffBlock.tsx:1-9` comments "Unlike the TUI's exact changed-row comparison", hinting the repo once had a TUI reference point; git history may surface reusable design decisions.
 
-`CommandRuntime`（`packages/interaction/commands/src/index.ts:225`），per-agent `ScopedLayers`。`register`（`:245`）、`execute`（`:297`）、`list`（`:260`）。TUI 自建 autocomplete。
+warp and requirement #1 (multi-session semantic transparency) are two problems: warp = real-time co-viewing of one session; requirement #1 = cross-session/cross-time semantic transparency across N sessions each running its own AI. warp solves the former; the SF platform + memory scheme solves the latter.
 
-### 7.4 terminal 包（不是 TUI host）
+### SF loose coupling and staged memory adoption
 
-`packages/terminal/` 是 agent 驱动持久 PTY 的 capability（`terminal/src/index.ts:105`），per-agent、带审计、sandbox-fence。给的是 pty 不是画布。TUI 复用：消费 pty 输出流（如 Web client `bash-sample.tsx` 那样但用终端渲染器），或注册新 `TerminalBackend`。
+Loose-coupling four-pack (analogous to CC ↔ warp/SF):
 
-## 8. warp session-share：实时协作层（外部能力，不耦合）
-
-调查 `/data/AI_Dev/warp` + `/data/AI_Dev/sf/ai-hub` 结论：
-
-- **终端流级共享（tmux 式）**：PTY 字节是渲染输出真相源，经服务端中继（ai-hub Socket.IO，生产 `wss://sessions.app.warp.dev`，OSS 补丁 0001/0006 改指向 ai-hub）。
-- **viewer 可输入**：`WriteToPty` 字节逐字落到 sharer 的 PTY master fd，调用链追到 `local_tty/event_loop.rs:289 self.pty.writer().write(bytes)`——与本地按键同一路径。门控：`SharedSessionWriteToLongRunningCommands` + long-running block + Executor 角色。
-- **在 warp 里跑 CC/dsh**：共享的是 TUI 的**终端渲染字节 + 按键流**，不是 app 级结构化共享。
-- **混合模型**：PTY 字节 = 渲染真相；上层叠 app 级边带事件（`CommandExecutionStarted/Finished` 带 `participant_id`+AI metadata、`AgentResponseEvent`、CRDT `InputUpdate`、初始化 `Scrollback`）。
-
-**对 dsh TUI 的影响**：
-- **不写协作代码**：dsh TUI 跑在 warp 里白拿终端流共享 + 审批协作（审批 answerer 读 stdin 按键，warp 把 viewer 按键逐字写同一 PTY stdin → viewer 可直接回答审批卡）。
-- **绕开 SDK approval 缺口**：warp 模式下审批走 PTY stdin，不经 SDK wire。
-- **门控风险**：warp viewer 写入 gated on `SharedSessionWriteToLongRunningCommands` + long-running block。dsh 阻塞式审批 readline 是否被判为 long-running 需实测——若不行，answerer 要改非阻塞或显式长时运行标记。
-- **历史线索**：`DiffBlock.tsx:1-9` 注释"Unlike the TUI's exact changed-row comparison"暗示仓库曾存在 TUI 参照点，查 git 历史可复用其设计决策。
-
-**warp 与需求 #1（多 session 语义透明）是两个问题**：warp = 实时同看一个 session；需求 #1 = N 个 session 各跑各 AI 的跨 session/跨时间语义透明。前者 warp 解决，后者 SF 平台 + 记忆解决。
-
-## 9. SF 松耦合与记忆分阶段接入
-
-### 9.1 松耦合四件套（类比 CC ↔ warp/SF）
-
-| 关联面 | CC 做法 | dsh TUI 等价 | dsh 现状 |
+| surface | CC's approach | dsh TUI equivalent | dsh current state |
 |---|---|---|---|
-| MCP | CC 连 MCP server 拿外部工具 | `dsh-mcp-client` 连 SF `ai-mcp-adapter`（`memory.recall/get/feedback`） | **已有** `packages/mcp/mcp-client` |
-| CLI | CC 调外部 CLI | SessionEnd 生命周期事件 → 调 `sf memory capture`（dsh 当 ai-cli 角色） | 需在 tui-runner 加采集钩子 |
-| CLAUDE.md/AGENTS.md | 项目级强规则 | `workspaceContext`（AGENTS.md loader，agent-spine-demo 已挂） | **已有** |
-| Skills/Rules/hooks | CC 原生 | `dsh-skill` + `packages/hooks/`（hooks-claude-code 桥读 CC hooks.json） | **已有** |
+| MCP | CC connects MCP servers for external tools | `dsh-mcp-client` connects SF `ai-mcp-adapter` (`memory.recall/get/feedback`) | **exists** `packages/mcp/mcp-client` |
+| CLI | CC calls external CLIs | SessionEnd lifecycle event → call `sf memory capture` (dsh as the ai-cli role) | needs a capture hook in tui-runner |
+| CLAUDE.md/AGENTS.md | project-level hard rules | `workspaceContext` (AGENTS.md loader, agent-spine-demo already attaches) | **exists** |
+| Skills/Rules/hooks | CC native | `dsh-skill` + `packages/hooks/` (hooks-claude-code bridge reads CC hooks.json) | **exists** |
 
-松耦合成立：dsh 对 SF 的全部依赖收敛到「一个 MCP server 配置 + 一条 CLI 调用 + 项目级 AGENTS.md」，拔掉仍独立可跑。
+Loose coupling holds: every dsh dependency on SF collapses to "one MCP server config + one CLI call + project-level AGENTS.md", and pulling it leaves dsh independently runnable.
 
-### 9.2 记忆方案分阶段接入（不建双权威）
+Staged memory adoption (no second authority): the memory scheme (`/data/AI_Dev/sf/ai-docs/productionDesign/多人AI协作开发大模型记忆管理技术方案.md`) directly serves requirement #1 ("the AI has sufficient context, fewer conflicts"). But the full governance loop (Evidence→Candidate→Version→Review→Revoke→Policy + Gateway L3/L4 + golden-corpus eval) is a large SF four-repo effort (`ai-core`/`ai-mcp-adapter`/`ai-tool-gateway`/`ai-cli`); the scheme's own §13 stages it M0-M5. dsh TUI is a harness, not the SF control plane; the memory authority lives in ai-core, and dsh must not build a second authority (ADR-MEM-001 + invariant 6 fail-closed).
 
-记忆方案（`/data/AI_Dev/sf/ai-docs/productionDesign/多人AI协作开发大模型记忆管理技术方案.md`）**直接命中**需求 #1"AI 有充分上下文、更少冲突"。但：
-- 完整治理闭环（Evidence→Candidate→Version→Review→Revoke→Policy + Gateway L3/L4 + 黄金语料评测）是 SF 四仓 `ai-core`/`ai-mcp-adapter`/`ai-tool-gateway`/`ai-cli` 大工程，方案 §13 自己分 M0-M5。
-- dsh TUI 是 harness，不是 SF 控制平面；记忆权威在 ai-core，dsh 不该自建第二权威（ADR-MEM-001 + 不变量 6 fail-closed）。
+dsh plays = the memory scheme's `ai-cli` (thin collection adapter) + a recall consumer, not `ai-core`. Staged:
 
-**dsh 扮演 = 记忆方案里的 `ai-cli`（薄采集适配器）+ 一个 recall consumer**，不是 `ai-core`。分阶段：
-
-| TUI Phase | 记忆接入 | 对应方案 milestone |
+| TUI Phase | memory adoption | scheme milestone |
 |---|---|---|
-| Phase 0-1（TUI 本体） | 无记忆接入，先跑通单机 TUI | — |
-| Phase 2（渲染层） | 接入 `memory.recall` 作为 in-process tool（经 `dsh-mcp-client` 连 `ai-mcp-adapter`），让 TUI 内 AI 召回跨人跨 session 历史 | M3 partial |
-| Phase 3（交互深化） | SessionEnd 触发 Evidence 采集：dsh session-lifecycle 事件 → 复用 `sf memory capture`（不重写采集/脱敏/队列/重放，复用 ai-cli 已修好的 §8.3.1） | M2 partial |
-| 后续（单独决策） | 完整治理闭环由 SF 四仓推进，dsh 只消费 | M4-M5 |
+| Phase 0-1 (TUI body) | no memory adoption, get the single-machine TUI running first | — |
+| Phase 2 (render layer) | adopt `memory.recall` as an in-process tool (via `dsh-mcp-client` → `ai-mcp-adapter`), letting the TUI's AI recall cross-person cross-session history | M3 partial |
+| Phase 3 (interaction deepening) | SessionEnd triggers Evidence capture: dsh session-lifecycle event → reuse `sf memory capture` (do not rewrite collection/redaction/queue/replay, reuse ai-cli's already-fixed §8.3.1) | M2 partial |
+| later (separate decision) | full governance loop driven by the SF four repos; dsh only consumes | M4-M5 |
 
-## 10. 远程模式 transport 调查结论（BFF SSE，已定）
+## Acceptance criteria
 
-针对约束 2"保留独立远程开发能力"，TUI 远程瘦 client 的 transport **已定为 BFF SSE**。源码级逐项验证（`packages/host/apiproxy/src/api/events.ts`、`api-proxy.ts`、`fetch/handler.ts`、`api-request-trust.ts`、`packages/sdk/protocol/`、`packages/sdk/server/`、`packages/sdk/client/`）。
+- **Phase 0 (prototype, verified):** `packages/examples/tui-demo/` standalone bin, keyless, proves the event-stream → render path. Demonstrated on bash-tool and text-turn fixtures: `task> [agent:running]` → `[tool/call] bash(...)` → `[tool/result] [ok] ...` → `[turn/end] completed` → `[agent:idle]`; text-turn pure streaming also renders. Reproduce with `node --import tsx/esm packages/examples/tui-demo/src/bin.ts` (Node v22+). Two real bugs fixed: (1) stdin must be read before `boot()` to buffer; (2) `rl.close()` cannot be called inside the line handler (a synchronous close event lets a tick overwrite `resolve(l)`).
+- **Phase 1 (product TUI bundle, in-process):** `packages/bundle/tui/` (mirrors `headless`/`web-app`) + `tui-startup` + `tui-runner`. `ctx.agents.create` + `ctx.on('session/event')` + register approval/ask-user answerer + `setRawMode` + `BlockAssembler` + `ctx.appExit`. **Standalone bin + overlay, does not register in `PROFILE_TEMPLATES`** (per the upstream-follow strategy below).
+- **Phase 2 (render layer + BFF SSE transport):** pick a terminal render stack (reuse pi-tui — precedent exists); port `ansi.ts`/`markdown/incremental.ts`; implement the 8 card components + todo/plan projection; write an `EventSourceTransport` adapter to the BFF; slash-command autocomplete. Connect `memory.recall` via `dsh-mcp-client` (M3 partial).
+- **Phase 3 (interaction deepening + capture):** Code Mode sub-call render (`tool/code-dispatch-*`); spill file/exit code/cwd; `--resume` rebuild from JSONL; SessionEnd calls `sf memory capture` (M2 partial). Dual-transport swappable adapter.
+- **No `agent-loop` change** in any phase (honors `CLAUDE.md` "Plugins, not loop changes"). Any core-file change is first evaluated for an overlay/new-package bypass; only if no bypass exists does it enter a patch series.
 
-### 10.1 判定矩阵（每格 file:line）
+## Risks
 
-| 维度 | BFF (A) 已选 | SDK (B) 延后 |
+1. **Remote transport choice — decided BFF SSE, Phase 2 does BFF only, SDK deferred.** Source-level verification: the BFF mux stream already closes the loop on approval/ask-user (`approval/requested`/`question/requested` + `POST /api/respond`); the SDK is a "dead capability" (the server never `transport.request`, `FakeTransport` asserts it never will, the client has no `onRequest`). A dual-transport adapter architecture is retained so the SDK can be attached later for automation scenarios once it gains the approval wire.
+2. **Render-stack choice — precedent exists.** The former TUI used `@earendil-works/pi-tui` (npm 0.84.2 online; the former used 0.80.7). Phase 2 evaluates pi-tui as the primary (its `TUI`→`TuiMainScreen` API has drifted and needs reconciliation); the 40 `terminal.expected.txt` pixel-exact snapshots are the deterministic acceptance standard for the rebuild. The choice is no longer "ink vs a pure-Node library" — there is a precedent to follow.
+3. **warp approval gating.** Whether `SharedSessionWriteToLongRunningCommands` covers dsh's blocking approval readline needs measurement; if not, the answerer becomes non-blocking.
+4. **Memory double-authority boundary.** dsh only plays `ai-cli` + recall consumer; the governance loop belongs to the SF four repos. Any capture must reuse `sf memory capture`, not bypass ai-cli's redaction/idempotence/SDK child guard.
+5. **Agent Note compliance.** Merge requires bilingual pairing + `verify-doc-budgets` + a companion keyless snapshot (`CLAUDE.md` testing policy).
+6. **Pre-release stance** (`CLAUDE.md`): no external consumers, so prefer the correct foundation over compatibility shims.
+
+## Alternatives considered
+
+### Remote transport: BFF SSE (chosen) vs JSON-RPC SDK (deferred) vs ACP vs Remote BFF/Typert
+
+For constraint 2 ("retain independent remote-development capability"), the TUI remote thin-client transport **is decided as BFF SSE**. Source-level per-cell verification against `packages/host/apiproxy/src/api/events.ts`, `api-proxy.ts`, `fetch/handler.ts`, `api-request-trust.ts`, `packages/sdk/protocol/`, `packages/sdk/server/`, `packages/sdk/client/`.
+
+Decision matrix (every cell file:line):
+
+| dimension | BFF (A) chosen | SDK (B) deferred |
 |---|---|---|
-| drive turn | `POST /api/session.prompt`（`fetch/handler.ts:99`，`api-proxy.ts:2401-2457`） | `session/prompt`（`types.ts:34-45`，`server.ts:190-201`） |
-| 流式 token | `session/event` 逐字 `SessionEvent`（`events.ts:70`） | `session.event`（`types.ts:51-56`，`server.ts:71-74`） |
-| tool call/result | `session/event` + host 算好的 `view`（`api-proxy.ts:713-749`） | 仅 `session.event`，无 `view` |
-| todo | `session/projection`（`events.ts:107`）+ `session/queue`（`:84`） | 无专用 frame（`types.ts:92-98`） |
-| approval 请求 | ✅ `approval/requested`（`events.ts:72`，`api-proxy.ts:3384`） | ❌ dead capability |
-| approval 回答 | ✅ `POST /api/respond`（`api-proxy.ts:3633-3647`），`ApprovalResponsePayload`（`approvals.ts:17-21`） | ❌ 无 `onRequest`（`client.ts:257-260`） |
-| ask-user | ✅ `question/requested`+`POST /api/respond`（`api-proxy.ts:3648-3678`），`QuestionResponsePayload`（`questions.ts:16-19`） | ❌ 同 approval 缺口 |
-| host 算 render intent | ✅ `viewFor`（`api-proxy.ts:713-749`），`ToolEventView`（`events.ts:24-35`）挂 `session/event` 的 `view` slot | ❌ 协议无 `ToolEventView`（`types.ts:92-105`） |
-| resume/list | ✅ `session.list`（`sessions.ts:233`）+ `session.history`（`:282`，带 `view` 的 `HistoryEntry`） | ❌ switch 无 list/history/resume case |
-| 非 browser auth | Host-header fence，loopback 免凭据（`api-request-trust.ts:96-123`） | stdio spawn，无 auth |
-| 现成 consumer | 浏览器 WS client（`client/connection/src/index.ts:174-194`） | `HarnessClient`（`client.ts:184`） |
+| drive turn | `POST /api/session.prompt` (`fetch/handler.ts:99`, `api-proxy.ts:2401-2457`) | `session/prompt` (`types.ts:34-45`, `server.ts:190-201`) |
+| streaming token | `session/event` verbatim `SessionEvent` (`events.ts:70`) | `session.event` (`types.ts:51-56`, `server.ts:71-74`) |
+| tool call/result | `session/event` + host-computed `view` (`api-proxy.ts:713-749`) | `session.event` only, no `view` |
+| todo | `session/projection` (`events.ts:107`) + `session/queue` (`:84`) | no dedicated frame (`types.ts:92-98`) |
+| approval request | ✅ `approval/requested` (`events.ts:72`, `api-proxy.ts:3384`) | ❌ dead capability |
+| approval answer | ✅ `POST /api/respond` (`api-proxy.ts:3633-3647`), `ApprovalResponsePayload` (`approvals.ts:17-21`) | ❌ no `onRequest` (`client.ts:257-260`) |
+| ask-user | ✅ `question/requested`+`POST /api/respond` (`api-proxy.ts:3648-3678`), `QuestionResponsePayload` (`questions.ts:16-19`) | ❌ same gap as approval |
+| host-computed render intent | ✅ `viewFor` (`api-proxy.ts:713-749`), `ToolEventView` (`events.ts:24-35`) on the `session/event` `view` slot | ❌ protocol has no `ToolEventView` (`types.ts:92-105`) |
+| resume/list | ✅ `session.list` (`sessions.ts:233`) + `session.history` (`:282`, `HistoryEntry` with `view`) | ❌ switch has no list/history/resume case |
+| non-browser auth | Host-header fence, loopback credential-free (`api-request-trust.ts:96-123`) | stdio spawn, no auth |
+| existing consumer | browser WS client (`client/connection/src/index.ts:174-194`) | `HarnessClient` (`client.ts:184`) |
 
-### 10.2 决定性理由
+Decisive reason: **approval + ask-user close the loop on the BFF today; the SDK is a "dead capability".** This is a product-level hard requirement and cannot wait.
 
-**approval + ask-user 在 BFF 今天就闭环，SDK 是 "dead capability"。** 这是产品级硬需求，不能等。
+- The BFF mux stream (`events.ts:69-108`) already carries `approval/requested`/`resolved` (`:72-73`), `question/requested`/`resolved` (`:74-75`), all answered via `POST /api/respond` (`fetch/handler.ts:296-300`).
+- The SDK gap is not "to be enabled" but "does not exist": the server only `transport.notify`s, never `request`s (`server.ts:73-102`); `FakeTransport` **asserts** the server never `request`s (`server.spec.ts:19-29`); the client only installs `onNotification` (`client.ts:257-260`); `protocol/README.md:39` states "dead capability" verbatim. Filling the SDK requires touching 3 packages (protocol types + server emit site + client onRequest) + overturning the `FakeTransport` assertion + rewriting `viewFor`, violating the minimal-new-code rule.
 
-- BFF mux 流（`events.ts:69-108`）已携带 `approval/requested`/`resolved`（`:72-73`）、`question/requested`/`resolved`（`:74-75`），同走 `POST /api/respond`（`fetch/handler.ts:296-300`）。
-- SDK 缺口不是"待启用"而是"不存在"：server 只 `transport.notify` 从不 `request`（`server.ts:73-102`）；`FakeTransport` **断言**服务端永不 `request`（`server.spec.ts:19-29`）；client 只装 `onNotification`（`client.ts:257-260`）；`protocol/README.md:39` 明文 "dead capability"。补 SDK 需动 3 包（protocol types + server emit site + client onRequest）+ 翻 `FakeTransport` 断言 + 重写 `viewFor`，违反最小新代码。
+BFF bonus — host-computed `ToolEventView`: `viewFor(...)` (`api-proxy.ts:713-749`) computes `ToolEventView` (`events.ts:24-35`) server-side and hangs it on the `session/event` `view` field (`api-proxy.ts:3425-3430`). **The TUI consumes the host-computed render intent directly, skipping its own `presentCall/presentResult` calls** — matching "webUI-style interaction with the server": the TUI is the thin view at the browser's layer. The SDK has no such type.
 
-### 10.3 BFF 的额外红利：host-computed ToolEventView
+Decided open items: Phase 2 does BFF only, SDK deferred (confirmed 2026-08-18). The SDK remains an optional transport for later automation/headless scenarios, to be attached once it gains the approval wire. The dual-transport adapter architecture (`EventSourceTransport` vs `JsonRpcTransport` unified into one `SessionEvent` stream feeding one render layer) is retained so a later SDK swap is smooth.
 
-`viewFor(...)`（`api-proxy.ts:713-749`）服务端算好 `ToolEventView`（`events.ts:24-35`）挂 `session/event` 的 `view` 字段（`api-proxy.ts:3425-3430`）。**TUI 直接消费 host 算好的 render intent，跳过自调 `presentCall/presentResult`**——匹配"webUI 式与服务端交互"：TUI 是浏览器那层的瘦 view。SDK 无此类型。
+Three-mode transport landing:
 
-### 10.4 待定项已决
-
-- **Phase 2 只做 BFF，SDK 延后**（用户 2026-08-18 确认）。SDK 作为后续自动化/headless 场景的可选 transport，待其补 approval wire 再接入。
-- 保留双 transport adapter 架构（`EventSourceTransport` vs `JsonRpcTransport` 归一成统一 `SessionEvent` 流喂同一渲染层），后续接 SDK 时平滑切。
-
-### 10.5 三模式的 transport 落地
-
-| 模式 | transport | 事件源 |
+| mode | transport | event source |
 |---|---|---|
-| 本地 in-process | 直连 `ctx.on('session/event')` | in-process 事件火带（Phase 0 已验证） |
-| 远程瘦 client | BFF SSE（`EventSource` + `POST /api/respond`） | HTTP/SSE + host-computed `view` |
-| warp 内 | 终端字节流（无 transport） | PTY 字节 + `BlockAssembler` |
+| local in-process | direct `ctx.on('session/event')` | in-process event firehose (Phase 0 verified) |
+| remote thin client | BFF SSE (`EventSource` + `POST /api/respond`) | HTTP/SSE + host-computed `view` |
+| inside warp | terminal byte stream (no transport) | PTY bytes + `BlockAssembler` |
 
-## 11. Phase 0 原型验证 + 前任 TUI 恢复性审计结果
+Rejected alternatives: ACP — automation-only, strips live progress, fresh-session-only (`README.md:7,78,80`). Remote BFF / Typert — remote multi-tenant; Typert is a type-graph registry, not a client transport.
 
-### 11.1 Phase 0 原型（已验证）
+### Former-TUI recovery: rebuild from spec, do not mechanically restore
 
-`packages/examples/tui-demo/`（`@deepseek-ai/dsh-tui-demo`，分支 `phase0/tui-prototype`）已实现并 keyless 跑通：
+The repo once had a complete `@deepseek-ai/dsh-tui` v0.0.1, in `packages/ui/tui/` (84 files, src 7676 lines + tests 10321 lines + 40 `terminal.expected.txt` render snapshots) + `apps/cli/` (`src/tui.ts`, `config/tui.cordis.yml`, `src/tui-onboarding/`, `tests/pty-harness.ts`). Commit `10bb9cbf4a` (2026-08-04) "cleanup: remove TUI package and legacy dsh entrypoints" deleted it in one pass and archived 114 design notes the same day.
 
-- **8 文件**：`package.json`、`tsconfig.json`、`src/{index,invariant,bin,runner}.ts`、`cordis.yml`、`cordis.snapshot.yml`。
-- **verified: true**：in-process `ctx.on('session/event')` + `ctx.on('agent/status')` 订阅 → 终端渲染管道跑通。
-- **实测输出**（bash-tool fixture）：`task> [agent:running]` → `[tool/call] bash(...)` → `[tool/result] [ok] ...` → `[turn/end] completed` → `[agent:idle]`。text-turn fixture 纯流式也渲染成功。
-- **keyless**：`DSH_SNAPSHOT=replay` + `cordis.snapshot.yml`（llm-replay + committed fixture），不需 `DEEPSEEK_API_KEY`。
-- **修复了两个真实 bug**：(1) stdin 须在 `boot()` 前读以缓冲；(2) `rl.close()` 不能在 line handler 内调（同步 close 事件下 tick 覆盖 `resolve(l)`）。
-- **复现**：`node --import tsx/esm packages/examples/tui-demo/src/bin.ts`（需 Node v22+）。
+Removal reason (established): not technical debt, but the pre-release stance (`CLAUDE.md` "Pre-release stance: foundation over blast radius") moving a not-yet-external surface out of the first RC (`dsh-v0.1.0-rc.7` was tagged 13 days after the deletion). The same day still merged PR #1359 `perf/tui-long-session-render` at 10:06, then deleted everything at 13:20 — the surface was judged "not RC-ready" and moved out of blast radius, not a failure.
 
-**结论**：in-process `session/event` → 终端渲染、keyless、stdin 驱动 turn 三条路径均通。
+Former-TUI artifact: renderer `@earendil-works/pi-tui` (npm still online, 0.84.2; the former used 0.80.7). Module structure: `src/{runtime,prompt,config,index,invariant}.ts` + `chat/` (autocomplete/channel/file-autocomplete/model-command/questions/resume/skill-invocation/timing/tokens) + `components/` (content/dialogs/text/theme/transcript/xml-tool-output) + `extension/` (overlay-manager/types, the `ctx.tui.openOverlay()` FIFO arbiter). The 40 snapshots carry pixel-exact SGR specs like `terminal 96x36 buffer=normal` + per-line `style N-M fg=bright-magenta bold underline` — the **deterministic acceptance standard for the rebuild**.
 
-### 11.2 前任 TUI 恢复性审计（决定性，推翻 greenfield 假设）
+Recovery drift audit (RED, but a single root cause, not the render layer): restoring `git checkout 10bb9cbf4a^ -- packages/ui/tui/ apps/cli/...` to the working tree and running Map→Fix→Verify:
 
-仓库**曾有完整 `@deepseek-ai/dsh-tui` v0.0.1**，住 `packages/ui/tui/`（84 文件，src 7676 行 + tests 10321 行 + 40 个 `terminal.expected.txt` 渲染快照）+ `apps/cli/`（`src/tui.ts`、`config/tui.cordis.yml`、`src/tui-onboarding/`、`tests/pty-harness.ts`）。commit `10bb9cbf4a`（2026-08-04）"cleanup: remove TUI package and legacy dsh entrypoints" 一次性删除，同日归档 114 份设计 note。
+- Fix-stage mechanical renames done (12 files, tui-side): `dsh-compact→dsh-compaction`, `dsh-user-interaction→dsh-user-questions`, `UserInteractionError→UserQuestionError`, `UserInteractionService→UserQuestionService`, `ctx.userInteraction→ctx.userQuestions`, `COMPACT_CHECKPOINT_SOURCE→compactCheckpointSource(CompactionId())`, pi-tui 0.80.7→0.84.2, `TUI→TuiMainScreen`, `@cordisjs/plugin-loader→@deepseek-ai/cordis-plugin-loader`, tsconfig path fixes. **`pnpm install` passed.**
+- typecheck: 111 tsc errors, classified: 33× TS2339 (`ctx.llm/sessions/commands/tools/tokenMeter/agents/userQuestions/systemPrompt` not on `Context` — declaration-merge broke), 48× TS7006 (implicit any, downstream cascade), 13× TS2345 (EventMap name drift like `llm/adapters-updated`/`commands/change`), the rest pi-tui API.
+- 40 snapshots 0/40 fail, but **same root cause**: `TypeError: installAgentLlmTarget is not a function at createTuiChat (index.ts:592)` — harness setup throws before mount, **never reaching render/snapshot comparison**. Render-layer drift remains unknown.
 
-**移除理由（已查清）**：非技术债，是 pre-release stance（CLAUDE.md "Pre-release stance: foundation over blast radius"）下把未对外的 surface 移出首 RC（`dsh-v0.1.0-rc.7` 在删除后 13 天打）。删除当天 10:06 还在 merge PR #1359 `perf/tui-long-session-render`，13:20 整体删——是被判定"未达 RC-ready"而移出 blast radius，不是失败。
+Decisive blocker: `installAgentLlmTarget` is a deleted core seam. `packages/core/agent/src/llm-target.ts` **does not exist in the current tree**. The former TUI's `index.ts:592` calls `installAgentLlmTarget(agent.ctx, target)`, that file's export — an interactive model-selection coupling mechanism: it attaches mutable provider/model/reasoning-strength routing to the agent's `system-prompt/assemble` + `agent/request` waterfall, letting the front door (TUI) switch models between steps. **Deleting the TUI also deleted this interaction seam from core**; the Web BFF replaced it with a different model-selection path.
 
-**前任 TUI 实物**：渲染器 `@earendil-works/pi-tui`（npm 仍在线，0.84.2，前任用 0.80.7）。模块结构：`src/{runtime,prompt,config,index,invariant}.ts` + `chat/`（autocomplete/channel/file-autocomplete/model-command/questions/resume/skill-invocation/timing/tokens）+ `components/`（content/dialogs/text/theme/transcript/xml-tool-output）+ `extension/`（overlay-manager/types，即 `ctx.tui.openOverlay()` FIFO 仲裁器）。40 个快照含逐像素 SGR 规格如 `terminal 96x36 buffer=normal` + 每行 `style N-M fg=bright-magenta bold underline`——**重建的确定验收标准**。
+This is **not package-rename mechanical drift; it is an interaction seam removed from core**. Restoring the TUI means either (a) restoring `llm-target.ts` into core (**violates the no-core-change constraint below**), or (b) rewriting the TUI's model-controller onto the model-selection path the Web BFF now uses (equal to rewriting a key interaction layer).
 
-### 11.3 恢复性 drift 审计结果（RED，但根因单一且非渲染层）
+Final judgment: **rebuild from the deleted artifact as spec, do not mechanically restore.** Rationale:
 
-把 `git checkout 10bb9cbf4a^ -- packages/ui/tui/ apps/cli/...` 拉回工作树，跑 Map→Fix→Verify 三阶段审计：
+1. The `installAgentLlmTarget` seam was deleted from core; restoring requires touching core or rewriting the model-controller (the former violates the no-core-change constraint, the latter equals rewriting the interaction layer).
+2. 33 Context declaration-merges + 13 EventMap renames are systematic mechanical work, doable, but the model-controller seam is still missing.
+3. The 40 snapshots never actually tested the render layer (all failed at setup); restoration cost is unpredictable.
 
-- **Fix 已做的机械 rename（12 文件，tui 侧）**：`dsh-compact→dsh-compaction`、`dsh-user-interaction→dsh-user-questions`、`UserInteractionError→UserQuestionError`、`UserInteractionService→UserQuestionService`、`ctx.userInteraction→ctx.userQuestions`、`COMPACT_CHECKPOINT_SOURCE→compactCheckpointSource(CompactionId())`、pi-tui 0.80.7→0.84.2、`TUI→TuiMainScreen`、`@cordisjs/plugin-loader→@deepseek-ai/cordis-plugin-loader`、tsconfig 路径修正。**pnpm install 通过**。
-- **typecheck**：111 tsc 错，分类：33× TS2339（`ctx.llm/sessions/commands/tools/tokenMeter/agents/userQuestions/systemPrompt` 不在 `Context` 上——declaration-merge 断）、48× TS7006（implicit any，下游连锁）、13× TS2345（EventMap 名字漂移如 `llm/adapters-updated`/`commands/change`）、其余 pi-tui API。
-- **40 快照 0/40 全挂**，但**同一根因**：`TypeError: installAgentLlmTarget is not a function at createTuiChat (index.ts:592)`——harness setup 在挂载前抛，**根本没到渲染/快照比对**。渲染层 drift 仍未知。
+Correct path: treat the deleted TUI (84 files + 40 snapshots + 114 archived notes) as **spec and reference implementation**, not as a base. Start from the verified Phase 0 `tui-demo` (in-process `session/event` pipeline works), rebuild the render layer against the 40 snapshots' pixel-exact spec, and route the model-controller through the current core's path (do not revive `installAgentLlmTarget`). This matches the "pure-additive new package, do not touch core" constraint.
 
-### 11.4 决定性阻断点：`installAgentLlmTarget` 是被删的 core seam
+Architectural fact this establishes: `llm-target.ts` was deleted with the TUI, confirming that dsh's "core seam the interactive front door uses" and the TUI are **symbiotic** — when the TUI was deleted, core also deleted its dedicated entry point. This is the aggressive face of the pre-release stance: "foundation over blast radius" deletes not only the not-yet-external surface but also the core interface that served only it. The rebuild must therefore go through the current core's existing seam (the Web BFF's model-selection path), not revive the deleted one.
 
-`packages/core/agent/src/llm-target.ts` **在当前树已不存在**。前任 TUI `index.ts:592` 调的 `installAgentLlmTarget(agent.ctx, target)` 是该文件导出——一个交互式模型选择耦合机制：把可变 provider/model 路由挂到 agent 的 `system-prompt/assemble` + `agent/request` waterfall，让 front door（TUI）能在 step 间切模型。**删除 TUI 时 core 侧配套删除了这个交互 seam**，Web BFF 用了另一套模型选择路径替代。
+### Upstream-follow strategy: fork maintenance (key constraint)
 
-这**不是包改名级机械 drift，是一个交互 seam 从 core 被移除**。恢复 TUI 要么 (a) 把 `llm-target.ts` 恢复进 core（**违反 §14 不改 core**），要么 (b) 把 TUI 的 model-controller 重写到 Web BFF 现在用的模型选择路径（等于重写关键交互层）。
+deepseek-harness is an open-source project; the terminal conversion must **minimize impact on following upstream updates**. Three tiers by where the change lands:
 
-### 11.5 最终判定：以删除产物为规格重建，不机械恢复
-
-基于 11.2-11.4 全部证据：**不机械恢复前任 TUI**。理由：
-1. `installAgentLlmTarget` seam 已从 core 删除，恢复必须碰 core 或重写 model-controller（前者违反 §14，后者等于重写交互层）。
-2. 33 个 Context declaration-merge + 13 EventMap 名字是系统性机械工作，可做但 model-controller seam 仍缺。
-3. 40 快照从未真正测过渲染层（全挂 setup），恢复成本不可预测。
-
-**正确路径**：把删除的 TUI（84 文件 + 40 快照 + 114 归档 note）当**规格与参考实现**，而非 base。以已验证的 Phase 0 `tui-demo`（in-process `session/event` 管道通）为起点，按 40 快照的逐像素规格重建渲染层，model-controller 走当前 core 的路径（不复活 `installAgentLlmTarget`）。这正契合 §14 的"纯加法新包，不碰 core"。
-
-`★ Insight`：`llm-target.ts` 随 TUI 一起删，印证了一个架构事实——dsh 的"交互 front door 用的 core seam"与 TUI **共生**：TUI 删时 core 也删了它的专有入口。这是 pre-release stance 的激进面："foundation over blast radius"不仅删未对外 surface，还删了只服务它的 core 接口。重建因此必须走当前 core 现有 seam（Web BFF 的模型选择路径），不能复活被删 seam。`★`
-
-## 12. 改造路线图
-
-- **Phase 0 原型**（已验证）：`packages/examples/tui-demo/` standalone bin，keyless，证明事件流→渲染可行。
-- **Phase 1 产品 TUI bundle**（in-process）：`packages/bundle/tui/`（镜像 `headless`/`web-app`）+ `tui-startup` + `tui-runner`。`ctx.agents.create` + `ctx.on('session/event')` + 注册 approval/ask-user answerer + `setRawMode` + `BlockAssembler` + `ctx.appExit`。**standalone bin + overlay，不注册 `PROFILE_TEMPLATES`**（见 §14）。
-- **Phase 2 渲染层 + BFF SSE transport**：选型终端渲染栈（ink 复用 React 组件 vs 纯 Node 库）；移植 `ansi.ts`/`markdown/incremental.ts`；实现 8 个 card 组件 + todo/plan projection；写 `EventSourceTransport` adapter 连 BFF；slash-command autocomplete。经 `dsh-mcp-client` 接 `memory.recall`（M3 partial）。
-- **Phase 3 交互深化 + 采集**：Code Mode sub-call 渲染（`tool/code-dispatch-*`）；spill file/退出码/cwd；`--resume` 从 JSONL 重建；SessionEnd 调 `sf memory capture`（M2 partial）。双 transport 可换 adapter。
-- **后续**：完整记忆治理归 SF 四仓 M4-M5，dsh 只消费。
-
-## 13. 关键接入 seam 汇总（file:line）
-
-- 创建 agent：`AgentRegistry.create` — `packages/core/agent/src/index.ts:405`
-- 驱动一轮：`agent.followup` — `packages/core/agent/src/runtime-types.ts:122`；steer `:126`；inject `:130`；cancel `:85`；whenIdle `:91`
-- turn/step 机器：`ReactLoopAgent` — `packages/core/agent-loop/src/agent.ts:64`；kick `:210`；turn `:246`；step `:332`；buildRequest `:407`
-- 工具派发：`executeToolCalls` — `packages/core/agent-loop/src/tool-calls.ts:59`
-- 事件火带：`Session.append` — `packages/core/session/src/index.ts:604`；`session/event` `:641-647`
-- 审批 seam：`ApprovalService` — `packages/interaction/user-approval/src/index.ts:192`；`approval/request` waterfall `:30,318`
-- ask-user seam：`UserQuestionService` — `packages/interaction/user-questions/src/index.ts:38`；`registerProvider` `:64`
-- LLM 流式：`LlmRuntime.stream` — `packages/llm/llm/src/index.ts:171`；`llm/stream` waterfall `:64,923`；`BlockAssembler` `packages/llm/llm/src/assembler.ts`
-- MCP client：`packages/mcp/mcp-client/src/connection.ts` + `tools.ts`（注册 MCP tools 到 `ctx.tools`）
-- BFF 事件订阅（远程 transport 参考）：`packages/host/apiproxy/src/api-proxy.ts:3412-3500`；approval `:1391-1450`；mux frame `packages/host/apiproxy/src/api/events.ts:69-108`
-- SDK server（备选 transport 参考）：`packages/sdk/server/src/server.ts:71-103`
-- launcher 接线：`provideCmdline` — `packages/boot/cmdline/src/index.ts:68`；`PROFILE_TEMPLATES` — `packages/boot/app-boot/src/profile.ts:121`；`runProfile` — `apps/cli/src/profile-boot.ts:207`
-- Phase 0 参考：`packages/examples/tui-demo/src/runner.ts`（已验证）；`packages/examples/jsonrpc-demo/src/{bin,runner}.ts`；`packages/examples/agent-spine-demo/src/index.ts`
-
-## 14. 上游跟随策略（fork 维护，关键约束）
-
-deepseek-harness 是开源项目，终端化改造须**最小化对跟随 upstream 更新的影响**。按改造落点分三档：
-
-| 落点 | upstream merge 影响 | in-process 能力 | 适用 |
+| landing | upstream-merge impact | in-process capability | applies to |
 |---|---|---|---|
-| 纯加法新包（新目录，不改现有文件） | ✅ 几乎零冲突（新文件不与 upstream 冲突） | ✅ 保留 | TUI 代码主体 |
-| `cordis.patch.yml` overlay（per-user `$DSH_HOME`，不入树） | ✅ 零冲突（不在仓库） | ✅ 保留 | profile 配置层 |
-| 改 core 文件（如 `PROFILE_TEMPLATES` 加一行） | ⚠️ merge 冲突点 | ✅ | 能免则免 |
-| out-of-tree 独立仓（消费 `@deepseek-ai/dsh-*` 为 npm dep） | ✅ 零 fork 分叉 | ❌ 丢 in-process seam | 仅纯外部组件 |
+| pure-additive new package (new directory, no existing file changed) | ✅ near-zero conflict (new files do not conflict with upstream) | ✅ retained | TUI code body |
+| `cordis.patch.yml` overlay (per-user `$DSH_HOME`, not in tree) | ✅ zero conflict (not in the repo) | ✅ retained | profile config layer |
+| core-file change (e.g. add a line to `PROFILE_TEMPLATES`) | ⚠️ merge-conflict point | ✅ | avoid if possible |
+| out-of-tree independent repo (consumes `@deepseek-ai/dsh-*` as npm dep) | ✅ zero fork divergence | ❌ loses in-process seam | external-only components |
 
-**核心张力**：in-process 本地模式（§5）要求在树内；树内改动要最小化上游冲突。
+Core tension: the in-process local mode requires being in-tree; in-tree changes must minimize upstream conflict.
 
-**推荐策略：加法优先 + overlay 优先 + patch 兜底**
+Recommended strategy: additive-first + overlay-first + patch-fallback.
 
-1. **能加法就不改**：TUI 代码全放新包（`packages/examples/tui-demo/` Phase 0 → `packages/bundle/tui/` 产品级），全新文件，upstream merge 不冲突。
-2. **能 overlay 就不注册**：TUI 做成 standalone bin（镜像 `jsonrpc-demo`，自己 `boot()` 自己 `cordis.yml`），**不**注册进 `PROFILE_TEMPLATES`（`packages/boot/app-boot/src/profile.ts:121`）——避免那行 in-tree 编辑，零核心改动。`dsh --profile tui` 的 launcher 集成降级为后续可选低优项，或经 per-user `$DSH_HOME/cordis.patch.yml`（不入树）实现。
-3. **不可避免的 core 改动用 patch 兜底**：真到产品级必须改 core 时，照 `warp-patches` 模式维护 patch series + `sync-upstream.sh`（`/data/AI_Dev/sf/ai-hub/warp-patches/` 是活样本：fork OSS、补丁定制、sync 上游）。dsh 自带 `cordis.patch.yml` patch 栈 + `--patch` overlay 是原生等价物。
+1. **Additive over in-tree edit:** all TUI code lives in a new package (`packages/examples/tui-demo/` Phase 0 → `packages/bundle/tui/` product-grade), all-new files, no upstream-merge conflict.
+2. **Overlay over registration:** the TUI is a standalone bin (mirroring `jsonrpc-demo`, its own `boot()` its own `cordis.yml`), **not** registered in `PROFILE_TEMPLATES` (`packages/boot/app-boot/src/profile.ts:121`) — avoiding that in-tree edit, zero core change. `dsh --profile tui` launcher integration demotes to a later optional low-priority item, or is realized via a per-user `$DSH_HOME/cordis.patch.yml` (not in tree).
+3. **Patch-fallback for unavoidable core changes:** when a product-grade change truly must touch core, maintain a patch series + `sync-upstream.sh` after the `warp-patches` pattern (`/data/AI_Dev/sf/ai-hub/warp-patches/` is a live sample: fork OSS, patch-customize, sync upstream). dsh's native `cordis.patch.yml` patch stack + `--patch` overlay is the native equivalent.
 
-**对方案各 Phase 的约束**：
-- Phase 0（原型）：standalone bin，纯加法新包——✅ 已对齐。
-- Phase 1（产品 bundle）：`packages/bundle/tui/` 新包 + standalone bin，不注册 `PROFILE_TEMPLATES`；`tui` profile 经 overlay 激活。
-- Phase 2-3：渲染层、transport adapter、采集钩子全在新包内；MCP 经 `dsh-mcp-client` 配置（不入树）；CLI 采集调 `sf memory capture`（外部，不入树）。
-- 任何需改 core 的需求，先评估能否用 overlay/新包绕开；不能绕开才进 patch series。
+Constraints on each phase: Phase 0 (prototype) standalone bin, pure-additive new package — ✅ aligned. Phase 1 (product bundle) `packages/bundle/tui/` new package + standalone bin, not registered in `PROFILE_TEMPLATES`; the `tui` profile activates via overlay. Phase 2-3 render layer, transport adapter, capture hook all inside the new package; MCP via `dsh-mcp-client` config (not in tree); CLI capture calls `sf memory capture` (external, not in tree). Any core-changing requirement is first evaluated for an overlay/new-package bypass; only if no bypass exists does it enter a patch series.
 
-## 15. 风险与决策点
+### Key attachment seams (file:line)
 
-1. **远程 transport 选型**：**已定 BFF SSE，Phase 2 只做 BFF，SDK 延后**。源码级验证：BFF mux 流已闭环 approval/ask-user（`approval/requested`/`question/requested` + `POST /api/respond`），SDK 是 "dead capability"（server 从不 `transport.request`，`FakeTransport` 断言锁死，client 无 `onRequest`）。保留双 transport adapter 架构，后续自动化场景再接 SDK。
-2. **渲染栈选型**：前任 TUI 用 `@earendil-works/pi-tui`（npm 0.84.2 在线，前任 0.80.7），有先例。Phase 2 评估 pi-tui 作为首选（其 `TUI`→`TuiMainScreen` API 已漂移，需对账）；40 个 `terminal.expected.txt` 逐像素快照是重建的确定验收标准。**不再从 ink/纯 Node 二选一**——有先例可循。
-3. **warp 审批门控**：`SharedSessionWriteToLongRunningCommands` 是否覆盖 dsh 阻塞式审批 readline，需实测；不行则 answerer 改非阻塞。
-4. **记忆双权威边界**：dsh 只做 `ai-cli` 角色 + recall consumer，治理闭环归 SF 四仓；任何采集必须复用 `sf memory capture`，不绕过 ai-cli 的脱敏/幂等/SDK child guard。
-5. **Agent Note 合规**：合并需双语 + `verify-doc-budgets` + 配套 keyless snapshot（`CLAUDE.md` testing policy）。
-6. **pre-release stance**（`CLAUDE.md`）：无外部消费者，优先正确 foundation 而非兼容 shim。
-
-## 16. 一句话结论
-
-**改造 = 新增 `packages/bundle/tui/` + 终端渲染层（复用 `ansi.ts`/`incremental markdown` 纯逻辑 + 直接消费 `presentation.ts` 纯数据 render intent）+ 注册 approval/ask-user/commands 的 in-process answerer + 可换的远程 transport adapter（BFF SSE，复用现有 Web BFF，不新建服务端）。** 不动 `agent-loop`。实时协作借 warp session-share（零代码），多 session 语义透明借 SF 平台 + 记忆方案（dsh 作 `ai-cli` 薄采集 + recall consumer，不双权威）。三模式并存（本地/远程/warp）共享同一渲染层，全程纯加法新包 + overlay 以最小化上游跟随冲突。最高风险项是 stdin raw-mode 读取与终端 markdown 渲染（全新代码），而非架构对接——Phase 0 已验证前者可行。
+- create agent: `AgentRegistry.create` — `packages/core/agent/src/index.ts:405`
+- drive one turn: `agent.followup` — `packages/core/agent/src/runtime-types.ts:122`; steer `:126`; inject `:130`; cancel `:85`; whenIdle `:91`
+- turn/step machine: `ReactLoopAgent` — `packages/core/agent-loop/src/agent.ts:64`; kick `:210`; turn `:246`; step `:332`; buildRequest `:407`
+- tool dispatch: `executeToolCalls` — `packages/core/agent-loop/src/tool-calls.ts:59`
+- event firehose: `Session.append` — `packages/core/session/src/index.ts:604`; `session/event` `:641-647`
+- approval seam: `ApprovalService` — `packages/interaction/user-approval/src/index.ts:192`; `approval/request` waterfall `:30,318`
+- ask-user seam: `UserQuestionService` — `packages/interaction/user-questions/src/index.ts:38`; `registerProvider` `:64`
+- LLM stream: `LlmRuntime.stream` — `packages/llm/llm/src/index.ts:171`; `llm/stream` waterfall `:64,923`; `BlockAssembler` `packages/llm/llm/src/assembler.ts`
+- MCP client: `packages/mcp/mcp-client/src/connection.ts` + `tools.ts` (registers MCP tools on `ctx.tools`)
+- BFF event subscription (remote transport reference): `packages/host/apiproxy/src/api-proxy.ts:3412-3500`; approval `:1391-1450`; mux frame `packages/host/apiproxy/src/api/events.ts:69-108`
+- SDK server (alternate transport reference): `packages/sdk/server/src/server.ts:71-103`
+- launcher wiring: `provideCmdline` — `packages/boot/cmdline/src/index.ts:68`; `PROFILE_TEMPLATES` — `packages/boot/app-boot/src/profile.ts:121`; `runProfile` — `apps/cli/src/profile-boot.ts:207`
+- Phase 0 reference: `packages/examples/tui-demo/src/runner.ts` (verified); `packages/examples/jsonrpc-demo/src/{bin,runner}.ts`; `packages/examples/agent-spine-demo/src/index.ts`
