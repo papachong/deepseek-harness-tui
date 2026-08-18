@@ -12,7 +12,7 @@ Status: implemented
 
 ## 决策
 
-删除 `packages/ui/tui` 包，不提供兼容包或别名。其源码、包测试、终端快照、依赖声明、已打补丁的 `pi-tui` 产物、workspace 引用、生成的服务目录条目和文档会一并移除。通用宿主能力与 agent loop（智能体循环）能力保持不变。
+删除已移除的 `ui/tui` 包，不提供兼容包或别名。其源码、包测试、终端快照、依赖声明、已打补丁的 `pi-tui` 产物、workspace 引用、生成的服务目录条目和文档会一并移除。通用宿主能力与 agent loop（智能体循环）能力保持不变。
 
 作为 TUI 包最后消费方的 SDK 项目工具链已由[工具链移除决策](2026-08-11-remove-sdk-project-toolchain.md)删除。宿主应用仍可直接挂载提供方无关的 `dsh-user-questions`、`dsh-commands` 和呈现服务。
 

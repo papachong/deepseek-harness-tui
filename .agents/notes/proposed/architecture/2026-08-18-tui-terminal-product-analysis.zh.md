@@ -210,13 +210,13 @@ BFF 额外红利——host 算好的 `ToolEventView`：`viewFor(...)`（`api-pro
 
 ### 前任 TUI 恢复：以删除产物为规格重建，不机械恢复
 
-仓库**曾有完整 `@deepseek-ai/dsh-tui` v0.0.1**，住 `packages/ui/tui/`（84 文件，src 7676 行 + tests 10321 行 + 40 个 `terminal.expected.txt` 渲染快照）+ `apps/cli/`（`src/tui.ts`、`config/tui.cordis.yml`、`src/tui-onboarding/`、`tests/pty-harness.ts`）。commit `10bb9cbf4a`（2026-08-04）"cleanup: remove TUI package and legacy dsh entrypoints" 一次性删除，同日归档 114 份设计 note。
+仓库**曾有完整 `@deepseek-ai/dsh-tui` v0.0.1**，住已删除的 `ui/tui` 包目录（84 文件，src 7676 行 + tests 10321 行 + 40 个 `terminal.expected.txt` 渲染快照）+ `apps/cli/`（`src/tui.ts`、`config/tui.cordis.yml`、`src/tui-onboarding/`、`tests/pty-harness.ts`）。commit `10bb9cbf4a`（2026-08-04）"cleanup: remove TUI package and legacy dsh entrypoints" 一次性删除，同日归档 114 份设计 note。
 
 移除理由（已查清）：非技术债，是 pre-release stance（`CLAUDE.md` "Pre-release stance: foundation over blast radius"）下把未对外的 surface 移出首 RC（`dsh-v0.1.0-rc.7` 在删除后 13 天打）。删除当天 10:06 还在 merge PR #1359 `perf/tui-long-session-render`，13:20 整体删——是被判定"未达 RC-ready"而移出 blast radius，不是失败。
 
 前任 TUI 实物：渲染器 `@earendil-works/pi-tui`（npm 仍在线，0.84.2，前任用 0.80.7）。模块结构：`src/{runtime,prompt,config,index,invariant}.ts` + `chat/`（autocomplete/channel/file-autocomplete/model-command/questions/resume/skill-invocation/timing/tokens）+ `components/`（content/dialogs/text/theme/transcript/xml-tool-output）+ `extension/`（overlay-manager/types，即 `ctx.tui.openOverlay()` FIFO 仲裁器）。40 个快照含逐像素 SGR 规格如 `terminal 96x36 buffer=normal` + 每行 `style N-M fg=bright-magenta bold underline`——**重建的确定验收标准**。
 
-恢复性 drift 审计（RED，但根因单一且非渲染层）：把 `git checkout 10bb9cbf4a^ -- packages/ui/tui/ apps/cli/...` 拉回工作树，跑 Map→Fix→Verify：
+恢复性 drift 审计（RED，但根因单一且非渲染层）：把已删除的 `ui/tui` 包与 `apps/cli/...` 经 `git checkout 10bb9cbf4a^` 拉回工作树，跑 Map→Fix→Verify：
 
 - Fix 已做的机械 rename（12 文件，tui 侧）：`dsh-compact→dsh-compaction`、`dsh-user-interaction→dsh-user-questions`、`UserInteractionError→UserQuestionError`、`UserInteractionService→UserQuestionService`、`ctx.userInteraction→ctx.userQuestions`、`COMPACT_CHECKPOINT_SOURCE→compactCheckpointSource(CompactionId())`、pi-tui 0.80.7→0.84.2、`TUI→TuiMainScreen`、`@cordisjs/plugin-loader→@deepseek-ai/cordis-plugin-loader`、tsconfig 路径修正。**pnpm install 通过**。
 - typecheck：111 tsc 错，分类：33× TS2339（`ctx.llm/sessions/commands/tools/tokenMeter/agents/userQuestions/systemPrompt` 不在 `Context` 上——declaration-merge 断）、48× TS7006（implicit any，下游连锁）、13× TS2345（EventMap 名字漂移如 `llm/adapters-updated`/`commands/change`）、其余 pi-tui API。
