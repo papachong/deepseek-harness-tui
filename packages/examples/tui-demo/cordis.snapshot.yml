@@ -1,0 +1,24 @@
+# Keyless replay includes the live cordis.yml, disables the key-requiring
+# DeepSeek adapter, and inserts llm-replay to serve recorded JSONL without a
+# key or network. The replay provider catalog claims the deepseek-official
+# route so agentDefaultModel.currentSelection() resolves to a registered
+# adapter. llm-replay reads DSH_SNAPSHOT_FILE from env at apply time
+# (llm-replay/src/index.ts:810-811).
+
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: llm-replay
+            name: '@deepseek-ai/dsh-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash
