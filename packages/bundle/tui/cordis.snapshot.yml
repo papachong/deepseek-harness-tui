@@ -17,7 +17,6 @@
           - id: llm-replay
             name: '@deepseek-ai/dsh-llm-replay'
             config:
-              file: !!js process.env.DSH_SNAPSHOT_FILE
               providers:
                 - id: deepseek-official
                   name: DeepSeek
