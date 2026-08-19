@@ -1280,21 +1280,51 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../core/agent
       '@deepseek-ai/dsh-agent-default-model':
         specifier: workspace:^
         version: link:../../core/agent-default-model
+      '@deepseek-ai/dsh-agent-spine-demo':
+        specifier: workspace:^
+        version: link:../../examples/agent-spine-demo
+      '@deepseek-ai/dsh-bash-local':
+        specifier: workspace:^
+        version: link:../../shell/bash-local
+      '@deepseek-ai/dsh-fs-local':
+        specifier: workspace:^
+        version: link:../../fs/fs-local
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-llm-deepseek':
+        specifier: workspace:^
+        version: link:../../llm/llm-deepseek
+      '@deepseek-ai/dsh-llm-replay':
+        specifier: workspace:^
+        version: link:../../test-support/llm-replay
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:^
+        version: link:../../session/session-persistence-jsonl
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
+      '@deepseek-ai/dsh-tool-fs':
+        specifier: workspace:^
+        version: link:../../fs/tool-fs
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools

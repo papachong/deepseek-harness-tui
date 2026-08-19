@@ -9,6 +9,7 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/include" },
     { "path": "../../../vendor/loader" },
     { "path": "../../boot/app-boot" },
     { "path": "../../core/agent" },
