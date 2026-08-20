@@ -8,7 +8,6 @@
  */
 
 import { existsSync } from 'node:fs'
-import { createInterface } from 'node:readline'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
@@ -19,6 +18,7 @@ import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
+import { createLineInput } from './input.ts'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
 const NAME = 'dsh-tui'
@@ -70,7 +70,7 @@ export async function runTui(): Promise<void> {
   // setRawMode does not restore the ECHO flag on a stdin that was paused
   // before the interface attached). A real TTY does not EOF-race the way a
   // pipe does, so only pause for non-TTY (piped) input.
-  if (process.stdin.isTTY !== true) {
+  if (!process.stdin.isTTY) {
     process.stdin.pause()
   }
 
@@ -96,12 +96,20 @@ export async function runTui(): Promise<void> {
   // (headless/src/index.ts:99).
   await ctx.get('loader')?.await()
 
-  // Now create the readline interface. stdin was paused before boot so its
-  // buffered piped data survives boot; createInterface resumes the stream
-  // and the for-await loop below drains it. Never close inside a line handler
-  // (Phase 0 bug b). Line-mode for Phase 1; raw-mode keypress is Phase 2.
-  const rl = createInterface({
+  // Now create the line dispatcher (single owner of readline). stdin was
+  // paused before boot so its buffered piped data survives boot; readline
+  // resumes the stream on creation and lines are queued in the dispatcher
+  // until drained. Never close inside a line handler (Phase 0 bug b).
+  // Line-mode for Phase 1; raw-mode keypress is Phase 2.
+  const input = createLineInput({
     input: process.stdin,
+    // output is REQUIRED for echo: with output omitted, Node's readline
+    // leaves this.output undefined and _writeToOutput silently drops every
+    // echo/refresh write (internal/readline/interface.js kWriteToOutput).
+    // terminal:true then sets raw mode (-echo) at the driver level, so the
+    // user's keystrokes are consumed but never displayed. process.stdout is
+    // the terminal surface (mirror runner.ts:166 usage).
+    output: process.stdout,
     terminal: !process.stdin.isTTY ? false : true,
   })
 
@@ -156,22 +164,33 @@ export async function runTui(): Promise<void> {
   // dsh-user-questions mounted simply skips the answerers (fail-closed stays).
   const disposeApproval = ctx.get('approval') === undefined
     ? () => {}
-    : registerApprovalAnswerer(ctx, { rl })
+    : registerApprovalAnswerer(ctx, { input })
   const disposeQuestions = ctx.get('userQuestions') === undefined
     ? () => {}
-    : registerUserQuestionProvider(ctx, { rl })
+    : registerUserQuestionProvider(ctx, { input })
 
   let exitCode = 0
   try {
     process.stdout.write('task> ')
-    // REPL LOOP: read line → followup (one new turn) → whenIdle (turn done)
-    // → flush → next line. for-await-of over readline yields lines and
-    // terminates on 'close' (EOF/Ctrl-D) → falls through to exit 0.
-    for await (const line of rl) {
+    // REPL LOOP: read task line → followup (one new turn) → whenIdle (turn
+    // done) → flush → next line. The dispatcher routes lines during a turn to
+    // a pending approval/ask-user reader instead of the task queue, so answer
+    // lines are never replayed to the agent as fake tasks (single-owner
+    // routing — optimization note 2026-08-19 §3). null on EOF/Ctrl-D → exit 0.
+    for (;;) {
+      const line = await input.nextTaskLine()
+      if (line === null) break
       const text = line.trim()
       if (text === '') {
         process.stdout.write('task> ')
         continue
+      }
+      // Built-in REPL commands (line-mode Phase 1): exit/quit end the loop
+      // cleanly (exit 0) instead of being sent to the agent as a task line.
+      const cmd = text.toLowerCase()
+      if (cmd === 'exit' || cmd === 'quit' || cmd === '/exit' || cmd === '/quit') {
+        process.stdout.write('bye\n')
+        break
       }
       agent.followup(createUserMessage({
         content: [{ type: 'text', text }],
@@ -196,7 +215,7 @@ export async function runTui(): Promise<void> {
     disposeStatus()
     disposeApproval()
     disposeQuestions()
-    rl.close()
+    input.close()
     await disposeAndExit(exitCode)
   }
 }

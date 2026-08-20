@@ -1,0 +1,154 @@
+/**
+ * LineInput dispatcher tests: single-owner routing of readline lines.
+ *
+ * Regression coverage for the shared-readline double-consumption bug
+ * (optimization note 2026-08-19 §3): a line answered to a pending
+ * approval/ask-user reader must NEVER also enter the REPL task queue (and
+ * vice versa). Uses PassThrough streams — readline runs in non-terminal line
+ * mode, which is the same routing path as a real TTY.
+ */
+
+import { PassThrough } from 'node:stream'
+import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
+import { describe, expect, it } from 'vitest'
+import { registerApprovalAnswerer } from '../src/answerers.ts'
+import { createLineInput, type LineInput } from '../src/input.ts'
+
+function make(): { stdin: PassThrough; stdout: PassThrough; input: LineInput } {
+  const stdin = new PassThrough()
+  const stdout = new PassThrough()
+  const input = createLineInput({ input: stdin, output: stdout, terminal: false })
+  return { stdin, stdout, input }
+}
+
+describe('createLineInput', () => {
+  it('queues task lines in order when no reader is pending', async () => {
+    const { stdin, input } = make()
+    stdin.write('first\n')
+    stdin.write('second\n')
+    expect(await input.nextTaskLine()).toBe('first')
+    expect(await input.nextTaskLine()).toBe('second')
+  })
+
+  it('routes a line to a pending reader and NOT to the task queue (double-consumption fix)', async () => {
+    const { stdin, input } = make()
+    const reader = input.readLine()
+    stdin.write('y\n')
+    expect(await reader).toBe('y')
+    // The answer line must not have been queued as a task: the next task
+    // line is the one typed after the answer, not the answer itself.
+    stdin.write('next task\n')
+    expect(await input.nextTaskLine()).toBe('next task')
+  })
+
+  it('serves multiple pending readers FIFO', async () => {
+    const { stdin, input } = make()
+    const r1 = input.readLine()
+    const r2 = input.readLine()
+    stdin.write('a\n')
+    stdin.write('b\n')
+    expect(await r1).toBe('a')
+    expect(await r2).toBe('b')
+  })
+
+  it('keeps lines typed before a prompt in the task queue, not the reader', async () => {
+    const { stdin, input } = make()
+    stdin.write('task typed before prompt\n')
+    const reader = input.readLine()
+    stdin.write('y\n')
+    expect(await reader).toBe('y')
+    expect(await input.nextTaskLine()).toBe('task typed before prompt')
+  })
+
+  it('does not trim lines (empty lines pass through)', async () => {
+    const { stdin, input } = make()
+    stdin.write('\n')
+    stdin.write('  padded  \n')
+    expect(await input.nextTaskLine()).toBe('')
+    expect(await input.nextTaskLine()).toBe('  padded  ')
+  })
+
+  it('resolves pending readers and task waiters with null on EOF', async () => {
+    const { stdin, input } = make()
+    const reader = input.readLine()
+    const task = input.nextTaskLine()
+    stdin.end()
+    expect(await reader).toBeNull()
+    expect(await task).toBeNull()
+  })
+
+  it('returns null after close() and is idempotent', async () => {
+    const { stdin, input } = make()
+    input.close()
+    input.close()
+    expect(await input.nextTaskLine()).toBeNull()
+    expect(await input.readLine()).toBeNull()
+    // late input after close must not resurrect routing
+    stdin.write('late\n')
+    expect(await input.nextTaskLine()).toBeNull()
+  })
+
+  it('settles queued waiters on close()', async () => {
+    const { input } = make()
+    const reader = input.readLine()
+    const task = input.nextTaskLine()
+    input.close()
+    expect(await reader).toBeNull()
+    expect(await task).toBeNull()
+  })
+
+  it('keeps routing to readers after EOF has settled prior waiters (closed guard)', async () => {
+    const { stdin, input } = make()
+    stdin.end()
+    expect(await input.nextTaskLine()).toBeNull()
+    expect(await input.readLine()).toBeNull()
+  })
+})
+
+describe('registerApprovalAnswerer (integration with LineInput)', () => {
+  /** Minimal ctx stub capturing the approval/request listener. */
+  function captureListener(): {
+    ctx: { on: (event: string, handler: unknown) => () => void }
+    /** The captured handler; call AFTER registerApprovalAnswerer. */
+    getHandler: () => (req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => Promise<ApprovalOutcome>
+  } {
+    let handler: ((req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => Promise<ApprovalOutcome>) | undefined
+    const ctx = {
+      on: (event: string, h: unknown) => {
+        expect(event).toBe('approval/request')
+        handler = h as typeof handler
+        return () => {}
+      },
+    }
+    return { ctx, getHandler: () => handler! }
+  }
+
+  const req: ApprovalRequest = { toolName: 'bash', callId: 'call_1', reason: 'run echo' }
+
+  it('answers via the dispatcher and does NOT leak the answer into the task queue', async () => {
+    const { stdin, input } = make()
+    const { ctx, getHandler } = captureListener()
+    const dispose = registerApprovalAnswerer(ctx, { input })
+    const outcome = getHandler()(req, () => Promise.resolve('unavailable'))
+    stdin.write('y\n')
+    expect(await outcome).toBe('allowed-once')
+    // The answer line must not have entered the task queue: the next task
+    // line is the one typed after the approval, not 'y'.
+    stdin.write('next task\n')
+    expect(await input.nextTaskLine()).toBe('next task')
+    dispose()
+  })
+
+  it('rejects on n and cancels on EOF', async () => {
+    const { stdin, input } = make()
+    const { ctx, getHandler } = captureListener()
+    const dispose = registerApprovalAnswerer(ctx, { input })
+    const rejected = getHandler()(req, () => Promise.resolve('unavailable'))
+    stdin.write('n\n')
+    expect(await rejected).toBe('rejected')
+    const cancelled = getHandler()(req, () => Promise.resolve('unavailable'))
+    stdin.end()
+    expect(await cancelled).toBe('cancelled')
+    dispose()
+  })
+})

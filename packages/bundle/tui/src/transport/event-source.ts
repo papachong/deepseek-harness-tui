@@ -21,7 +21,7 @@ export interface TransportEvent {
   /** The session event, or undefined for a non-session-event mux frame. */
   event: SessionEvent | undefined
   /** A host-computed render-intent view, when the BFF attached one. */
-  view: unknown | undefined
+  view: unknown
   /** The mux frame type for non-session frames (approval/question). */
   type: string | undefined
 }

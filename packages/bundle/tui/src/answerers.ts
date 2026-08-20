@@ -11,12 +11,16 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionItem, AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
-import { type Interface as ReadlineInterface } from 'node:readline'
+import type { LineInput } from './input.ts'
 
-/** A shared stdin interface the REPL and answerers take turns driving. */
+/** The single-owner line dispatcher shared by the REPL and the answerers. */
 export interface StdinAccess {
-  /** The readline interface owned by the runner; the answerer reuses it. */
-  rl: ReadlineInterface
+  /**
+   * The line dispatcher owned by the runner. Answerers read via it so their
+   * answer lines are routed to exactly one consumer (fixes the shared
+   * readline double-consumption bug — optimization note 2026-08-19 §3).
+   */
+  input: LineInput
 }
 
 /**
@@ -26,7 +30,7 @@ export interface StdinAccess {
  * and returns it to claim the request (per the waterfall contract, returning
  * a value rather than delegating to `next()` claims the decision).
  * @param ctx - the root context carrying `ctx.approval`.
- * @param stdin - the shared readline interface.
+ * @param stdin - the shared line dispatcher (single-owner routing).
  * @returns a disposer removing the listener.
  */
 export function registerApprovalAnswerer(ctx: Context, stdin: StdinAccess): () => void {
@@ -36,7 +40,7 @@ export function registerApprovalAnswerer(ctx: Context, stdin: StdinAccess): () =
     if (req.signal?.aborted === true) return 'cancelled'
     const label = req.callId === undefined ? req.toolName : `${req.toolName} (${req.callId})`
     process.stdout.write(`\n[approval] ${label}: ${req.reason ?? 'allow this action?'} [y/n] `)
-    const answer = await readLine(stdin.rl)
+    const answer = await stdin.input.readLine()
     if (answer === null) return 'cancelled'
     const trimmed = answer.trim().toLowerCase()
     if (trimmed === 'y' || trimmed === 'yes') return 'allowed-once'
@@ -61,30 +65,22 @@ export function registerUserQuestionProvider(ctx: Context, stdin: StdinAccess): 
         return Promise.reject(new UserQuestionError(
           'tui user-questions requires an agent-owned session', 'ASK_MISSING_AGENT'))
       }
-      const answers = await Promise.all(request.questions.map(q => answerOne(stdin.rl, q)))
+      const answers = await Promise.all(request.questions.map(q => answerOne(stdin.input, q)))
       return { answers }
     },
   })
-  return () => void dispose()
-}
-
-/** Read one line; return `null` on EOF (the readline 'close'). */
-function readLine(rl: ReadlineInterface): Promise<string | null> {
-  return new Promise((resolve) => {
-    const onLine = (l: string): void => { rl.off('close', onClose); resolve(l) }
-    const onClose = (): void => { rl.off('line', onLine); resolve(null) }
-    rl.once('line', onLine)
-    rl.once('close', onClose)
-  })
+  return () => {
+    dispose()
+  }
 }
 
 /** Answer one question: render it, read the selection, return the answer item. */
-async function answerOne(rl: ReadlineInterface, q: AskUserQuestionItem): Promise<{ id: string; selected: string[]; custom?: string }> {
+async function answerOne(input: LineInput, q: AskUserQuestionItem): Promise<{ id: string; selected: string[]; custom?: string }> {
   process.stdout.write(`\n[question] ${q.question}\n`)
   if (q.detail !== undefined) process.stdout.write(`${q.detail}\n`)
   if (q.options === undefined || q.options.length === 0) {
     process.stdout.write('> ')
-    const text = await readLine(rl)
+    const text = await input.readLine()
     return { id: q.id, selected: [], custom: text ?? '' }
   }
   q.options.forEach((opt, i) => {
@@ -92,7 +88,7 @@ async function answerOne(rl: ReadlineInterface, q: AskUserQuestionItem): Promise
     process.stdout.write(`  ${i + 1}. ${opt.label}${desc}\n`)
   })
   process.stdout.write(`Select ${q.multiSelect === true ? 'one or more (comma-separated)' : 'one'}> `)
-  const text = await readLine(rl)
+  const text = await input.readLine()
   if (text === null) return { id: q.id, selected: [] }
   const picks = text.split(',').map(s => s.trim()).filter(s => s !== '')
   const selected: string[] = []
