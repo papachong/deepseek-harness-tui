@@ -37,7 +37,7 @@ The "retain a server" constraint means **keep dsh's own Web BFF** (`packages/bun
 | Surface | transport | form | file:line |
 |---|---|---|---|
 | Headless one-shot | in-process | writes the last non-empty assistant text to stdout, exit 0/1, no streaming | `packages/bundle/headless/src/index.ts:129-133` |
-| Web browser | HTTP/SSE | React 18 app, full event replay | `packages/bundle/web-app/src/index.ts`; `packages/client/web-react/package.json:31` |
+| Web browser | HTTP/SSE | React 18 app, full event replay | `packages/bundle/web-app/src/index.ts`; `packages/client/web/package.json` |
 | ACP stdio | JSON-RPC stdio | automation-only, strips live progress/reasoning/tool/plan/title | `packages/acp/acp/README.md:7,78,80` |
 | JSON-RPC SDK | stdio JSON-RPC | forwards `session.event` verbatim, 3 requests + 4 notifications | `packages/sdk/server/src/server.ts:53-240` |
 

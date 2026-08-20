@@ -9,6 +9,8 @@
  */
 
 import { PassThrough } from 'node:stream'
+import type { Context } from '@deepseek-ai/cordis'
+import { CallId } from '@deepseek-ai/dsh-llm'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import { describe, expect, it } from 'vitest'
 import { registerApprovalAnswerer } from '../src/answerers.ts'
@@ -108,7 +110,7 @@ describe('createLineInput', () => {
 describe('registerApprovalAnswerer (integration with LineInput)', () => {
   /** Minimal ctx stub capturing the approval/request listener. */
   function captureListener(): {
-    ctx: { on: (event: string, handler: unknown) => () => void }
+    ctx: Context
     /** The captured handler; call AFTER registerApprovalAnswerer. */
     getHandler: () => (req: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => Promise<ApprovalOutcome>
   } {
@@ -119,11 +121,11 @@ describe('registerApprovalAnswerer (integration with LineInput)', () => {
         handler = h as typeof handler
         return () => {}
       },
-    }
+    } as unknown as Context
     return { ctx, getHandler: () => handler! }
   }
 
-  const req: ApprovalRequest = { toolName: 'bash', callId: 'call_1', reason: 'run echo' }
+  const req = { toolName: 'bash', callId: CallId('call_1'), reason: 'run echo', signal: undefined } as unknown as ApprovalRequest
 
   it('answers via the dispatcher and does NOT leak the answer into the task queue', async () => {
     const { stdin, input } = make()

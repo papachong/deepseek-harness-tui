@@ -37,7 +37,7 @@ deepseek-harness 当前交付三个 surface——headless 一次性、Web 浏览
 | Surface | 传输 | 形态 | file:line |
 |---|---|---|---|
 | Headless 一次性 | in-process | 取最后非空 assistant 文本写 stdout，exit 0/1，无流式 | `packages/bundle/headless/src/index.ts:129-133` |
-| Web 浏览器 | HTTP/SSE | React 18 app，完整事件回放 | `packages/bundle/web-app/src/index.ts`；`packages/client/web-react/package.json:31` |
+| Web 浏览器 | HTTP/SSE | React 18 app，完整事件回放 | `packages/bundle/web-app/src/index.ts`；`packages/client/web/package.json` |
 | ACP stdio | JSON-RPC stdio | automation-only，剥离 live progress/reasoning/tool/plan/title | `packages/acp/acp/README.md:7,78,80` |
 | JSON-RPC SDK | stdio JSON-RPC | 逐字转发 `session.event`，3 请求 + 4 通知 | `packages/sdk/server/src/server.ts:53-240` |
 
