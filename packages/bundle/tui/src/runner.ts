@@ -66,7 +66,13 @@ export async function runTui(): Promise<void> {
   // boot() (Phase 0 bug a, tui-demo runner.ts:48-63 — there fixed by reading
   // one line via a Promise before boot). For a multi-turn REPL we instead
   // pause stdin now and create the readline interface after boot settles.
-  process.stdin.pause()
+  // BUT: pause() on a real TTY breaks input echo (readline's terminal:true
+  // setRawMode does not restore the ECHO flag on a stdin that was paused
+  // before the interface attached). A real TTY does not EOF-race the way a
+  // pipe does, so only pause for non-TTY (piped) input.
+  if (process.stdin.isTTY !== true) {
+    process.stdin.pause()
+  }
 
   // boot() settles the whole Loader tree (app-boot/src/index.ts:757-802).
   const ctx = await boot(NAME, configPath, undefined, undefined, undefined)
