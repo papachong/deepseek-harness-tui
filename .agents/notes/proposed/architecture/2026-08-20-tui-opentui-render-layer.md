@@ -10,6 +10,18 @@ The dsh TUI bundle (`packages/bundle/tui/`) ships Phase 1–3 with a **raw `proc
 
 The [solution note](2026-08-18-tui-solution-and-dev-plan.md) Phase 2 named `@earendil-works/pi-tui` (the former TUI's renderer) as the primary, with 40 archived `terminal.expected.txt` snapshots as the acceptance standard. But an investigation of `/data/AI_Dev/opencode` reveals a **better-published, more-capable alternative**: `@opentui/solid` (npm `0.5.4`), the SolidJS terminal reconciler opencode's TUI uses, which ships a built-in streaming `<markdown>` component with shiki syntax highlighting, tables, KaTeX, and conceal — exactly the gaps dsh's hand-roll has.
 
+## Spike results (verified 2026-08-20)
+
+A hello-world spike renders `<text fg="green">Hello OpenTUI</text>` to the terminal under **Bun** (green RGB `[38;2;0;128;0m`, clean exit 0). Three findings corrected the original proposal:
+
+1. **`createCliRenderer()` is async** — it queries the terminal (DSR) over stdin and must be `await`ed. A synchronous call throws `Cannot create CliRenderer: stdin is already used by another CliRenderer`.
+2. **tsdown/rolldown does NOT compile Solid JSX.** `jsx: { runtime: 'solid' }` is ignored; rolldown falls back to the React jsx-runtime → `Cannot resolve 'react/jsx-runtime'`. Solid JSX compilation must go through `Bun.build()` with `@opentui/solid/bun-plugin`'s `createSolidTransformPlugin()` (the spike's `spike-build.ts` proves this path). Bun 1.3.14 does not handle Solid JSX at runtime either (defaults to React); the transform plugin is required.
+3. **Node-built `lib/bin.js` runs under Bun unchanged.** The tsdown-bundled non-JSX spine (runner/answerers/capture/bin) loads the cordis plugin tree, runs the agent spine, replays a fixture, and fires the SessionEnd capture hook under Bun. Only `process.loadEnvFile` is absent in Bun 1.3.14 (guard with `typeof process.loadEnvFile === 'function'`; Bun loads `.env` natively, so the call is redundant there).
+
+**Runtime decision: the `dsh-tui` bin runs under Bun, not Node/tsx.** This aligns with the TUI-renderer ecosystem: opencode is 100% Bun (`packageManager: bun@1.3.14`, `#!/usr/bin/env bun` shebang, no build step — exports point at `./src/index.tsx`); Claude Code is a Bun `--compile` native ELF binary. Bun is not a deviation for dsh — it is the standard runtime for this layer. The dsh toolchain (tsdown, vitest, lefthook, pre-push) stays Node; only the `dsh-tui` bin entrypoint changes from `node lib/bin.js` to `bun lib/bin.js`. The isolation surface is one bin entrypoint.
+
+**Hybrid build path:** tsdown (Node) bundles the non-JSX spine modules to `lib/`; a separate `Bun.build()` step with `createSolidTransformPlugin()` bundles the JSX `src/view/*.tsx` modules to `lib/view/`. Both outputs are plain ESM JS; the Bun bin runs them with no JSX left at runtime.
+
 ## Proposal
 
 ### Adopt `@opentui/solid` as the dsh TUI render layer, replacing the raw-stdout Phase 2 layer

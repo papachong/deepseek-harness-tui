@@ -10,6 +10,18 @@ dsh TUI bundle（`packages/bundle/tui/`）的 Phase 1–3 用的是**原始 `pro
 
 [方案 note](2026-08-18-tui-solution-and-dev-plan.md) Phase 2 把 `@earendil-works/pi-tui`（前任 TUI 的渲染器）作为首选，40 个归档 `terminal.expected.txt` 快照为验收标准。但对 `/data/AI_Dev/opencode` 的调查揭示了一个**已发布、能力更强的替代**：`@opentui/solid`（npm `0.5.4`），opencode TUI 使用的 SolidJS 终端 reconciler，内置流式 `<markdown>` 组件，带 shiki 语法高亮、表格、KaTeX、conceal——正是 dsh 手搓层的缺口。
 
+## Spike 结果（2026-08-20 验证）
+
+hello-world spike 在 **Bun** 下把 `<text fg="green">Hello OpenTUI</text>` 渲染到终端（绿色 RGB `[38;2;0;128;0m`，干净退出 0）。三个发现修正了原提案：
+
+1. **`createCliRenderer()` 是 async**——它通过 stdin 向终端查询（DSR），必须 `await`。同步调用抛 `Cannot create CliRenderer: stdin is already used by another CliRenderer`。
+2. **tsdown/rolldown 不编译 Solid JSX。** `jsx: { runtime: 'solid' }` 被忽略；rolldown 回退 React jsx-runtime → `Cannot resolve 'react/jsx-runtime'`。Solid JSX 编译必须经 `Bun.build()` + `@opentui/solid/bun-plugin` 的 `createSolidTransformPlugin()`（spike 的 `spike-build.ts` 证明了这条路径）。Bun 1.3.14 运行时也不处理 Solid JSX（默认 React）；transform 插件必需。
+3. **Node 构建的 `lib/bin.js` 在 Bun 下原样运行。** tsdown 打包的非 JSX spine（runner/answerers/capture/bin）在 Bun 下加载 cordis 插件树、跑 agent spine、replay fixture、触发 SessionEnd capture hook。仅 `process.loadEnvFile` 在 Bun 1.3.14 缺失（用 `typeof process.loadEnvFile === 'function'` 守卫；Bun 原生加载 `.env`，该调用在 Bun 下冗余）。
+
+**运行时决策：`dsh-tui` bin 走 Bun，不走 Node/tsx。** 这与 TUI 渲染器生态对齐：opencode 是 100% Bun（`packageManager: bun@1.3.14`、`#!/usr/bin/env bun` shebang、无构建步骤——exports 指向 `./src/index.tsx`）；Claude Code 是 Bun `--compile` 的原生 ELF 二进制。Bun 对 dsh 不是偏离——它是这一层的标准运行时。dsh 工具链（tsdown、vitest、lefthook、pre-push）仍是 Node；只有 `dsh-tui` bin 入口从 `node lib/bin.js` 改成 `bun lib/bin.js`。隔离面是一个 bin 入口。
+
+**混合构建路径：** tsdown（Node）把非 JSX spine 模块打包到 `lib/`；单独的 `Bun.build()` 步骤用 `createSolidTransformPlugin()` 把 JSX `src/view/*.tsx` 模块打包到 `lib/view/`。两者都是纯 ESM JS；Bun bin 运行时无 JSX 残留。
+
 ## 提案
 
 ### 采用 `@opentui/solid` 作为 dsh TUI 渲染层，替换 raw-stdout Phase 2 层
