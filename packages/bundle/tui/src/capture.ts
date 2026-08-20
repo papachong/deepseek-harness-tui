@@ -29,6 +29,7 @@ export interface CaptureIntent {
  * invoke `sf memory capture` until the user confirms (solution note Phase 3,
  * risk #4: any capture must reuse ai-cli's redaction/idempotence).
  * @param session - the session whose transcript would be captured.
+ * @returns the dry-run capture intent (sessionId, event count, dry-run flag).
  */
 export function dryRunCapture(session: Session): CaptureIntent {
   const intent: CaptureIntent = {

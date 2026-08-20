@@ -45,7 +45,10 @@ export class BffSseTransport {
     this.respondUrl = `${bffBaseUrl}/api/respond`
   }
 
-  /** Open the SSE stream and forward normalized events to the listener. */
+  /**
+   * Open the SSE stream and forward normalized events to the listener.
+   * @param listener - the callback receiving normalized transport events.
+   */
   connect(listener: TransportListener): void {
     this.source = new EventSource(this.url)
     this.source.addEventListener('message', (msg: MessageEvent) => {
@@ -59,7 +62,10 @@ export class BffSseTransport {
     })
   }
 
-  /** Post an approval/ask-user answer back to the BFF. */
+  /**
+   * Post an approval/ask-user answer back to the BFF.
+   * @param payload - the rpc id and outcome to post.
+   */
   async respond(payload: { rpcId: string; outcome: string }): Promise<void> {
     await fetch(this.respondUrl, {
       method: 'POST',

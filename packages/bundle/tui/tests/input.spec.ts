@@ -15,6 +15,7 @@ import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-app
 import { describe, expect, it } from 'vitest'
 import { registerApprovalAnswerer } from '../src/answerers.ts'
 import { createLineInput, type LineInput } from '../src/input.ts'
+import { createTuiStore } from '../src/view/store.js'
 
 function make(): { stdin: PassThrough; stdout: PassThrough; input: LineInput } {
   const stdin = new PassThrough()
@@ -107,7 +108,7 @@ describe('createLineInput', () => {
   })
 })
 
-describe('registerApprovalAnswerer (integration with LineInput)', () => {
+describe('registerApprovalAnswerer (integration with TuiStore)', () => {
   /** Minimal ctx stub capturing the approval/request listener. */
   function captureListener(): {
     ctx: Context
@@ -127,30 +128,27 @@ describe('registerApprovalAnswerer (integration with LineInput)', () => {
 
   const req = { toolName: 'bash', callId: CallId('call_1'), reason: 'run echo', signal: undefined } as unknown as ApprovalRequest
 
-  it('answers via the dispatcher and does NOT leak the answer into the task queue', async () => {
-    const { stdin, input } = make()
+  it('resolves allowed-once when the store answer is y', async () => {
+    const store = createTuiStore()
     const { ctx, getHandler } = captureListener()
-    const dispose = registerApprovalAnswerer(ctx, { input })
+    const dispose = registerApprovalAnswerer(ctx, { store })
     const outcome = getHandler()(req, () => Promise.resolve('unavailable'))
-    stdin.write('y\n')
+    // The answerer pushed a pending question into the store; resolve it.
+    expect(store.pendingQuestion()).toBeDefined()
+    store.resolveAnswer('y')
     expect(await outcome).toBe('allowed-once')
-    // The answer line must not have entered the task queue: the next task
-    // line is the one typed after the approval, not 'y'.
-    stdin.write('next task\n')
-    expect(await input.nextTaskLine()).toBe('next task')
+    // Resolving clears the pending question so the REPL task path is unblocked.
+    expect(store.pendingQuestion()).toBeUndefined()
     dispose()
   })
 
-  it('rejects on n and cancels on EOF', async () => {
-    const { stdin, input } = make()
+  it('rejects on n', async () => {
+    const store = createTuiStore()
     const { ctx, getHandler } = captureListener()
-    const dispose = registerApprovalAnswerer(ctx, { input })
+    const dispose = registerApprovalAnswerer(ctx, { store })
     const rejected = getHandler()(req, () => Promise.resolve('unavailable'))
-    stdin.write('n\n')
+    store.resolveAnswer('n')
     expect(await rejected).toBe('rejected')
-    const cancelled = getHandler()(req, () => Promise.resolve('unavailable'))
-    stdin.end()
-    expect(await cancelled).toBe('cancelled')
     dispose()
   })
 })

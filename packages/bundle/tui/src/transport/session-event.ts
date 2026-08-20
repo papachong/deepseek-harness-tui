@@ -17,7 +17,10 @@ export type UnifiedListener = (event: TransportEvent) => void
 
 /**
  * Subscribe to the in-process `session/event` firehose and forward each
- * event as a {@link TransportEvent}. Returns a disposer.
+ * event as a {@link TransportEvent}.
+ * @param ctx - the root context carrying the `session/event` firehose.
+ * @param listener - the callback receiving normalized transport events.
+ * @returns a disposer removing the listener.
  */
 export function subscribeInProcess(ctx: Context, listener: UnifiedListener): () => void {
   return ctx.on('session/event', (session: Session, event: SessionEvent) => {

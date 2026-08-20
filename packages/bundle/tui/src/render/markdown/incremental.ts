@@ -49,6 +49,8 @@ export class IncrementalMarkdownParser {
   /**
    * Fold the current accumulated text and return the frozen/tail split.
    * Idempotent for identical input.
+   * @param text - the full accumulated text so far this step.
+   * @returns the frozen/tail block split for incremental rendering.
    */
   update(text: string): IncrementalBlocks {
     if (this.cached !== null && text === this.prevText) return this.cached

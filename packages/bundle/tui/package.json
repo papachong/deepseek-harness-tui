@@ -37,6 +37,14 @@
       "types": "./lib/types/capture.d.ts",
       "default": "./lib/capture.js"
     },
+    "./view/store": {
+      "types": "./lib/types/view/store.d.ts",
+      "default": "./lib/view/store.js"
+    },
+    "./view/renderer": {
+      "types": "./lib/types/view/renderer.d.ts",
+      "default": "./lib/view/renderer.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -53,15 +61,39 @@
     "lib/render/projections.js",
     "lib/transport/event-source.js",
     "lib/transport/session-event.js",
+    "lib/view/store.js",
+    "lib/view/renderer.js",
+    "lib/view/app.js",
+    "lib/view/components/message.js",
+    "lib/view/components/tool-card.js",
+    "lib/view/components/projections.js",
+    "lib/view/components/prompt.js",
     "lib/types/**/*.d.ts"
   ],
+  "scripts": {
+    "build:view": "bun scripts/build-view.ts"
+  },
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-app-boot": "workspace:^",
+    "@opentui/core": "^0.5.4",
+    "@opentui/keymap": "^0.5.4",
+    "@opentui/solid": "^0.5.4",
     "anser": "^2.3.5",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm": "^3.1.0",
-    "micromark-extension-gfm": "^3.0.0"
+    "micromark-extension-gfm": "^3.0.0",
+    "solid-js": "^1.9.0"
+  },
+  "optionalDependencies": {
+    "@opentui/core-darwin-arm64": "^0.5.4",
+    "@opentui/core-darwin-x64": "^0.5.4",
+    "@opentui/core-linux-arm64": "^0.5.4",
+    "@opentui/core-linux-arm64-musl": "^0.5.4",
+    "@opentui/core-linux-x64": "^0.5.4",
+    "@opentui/core-linux-x64-musl": "^0.5.4",
+    "@opentui/core-win32-arm64": "^0.5.4",
+    "@opentui/core-win32-x64": "^0.5.4"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

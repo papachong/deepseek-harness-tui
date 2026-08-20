@@ -14,11 +14,14 @@ import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
 import { createLineInput } from './input.ts'
+import { createTuiStore, type TuiStore } from './view/store.js'
+import { createTuiRenderer, renderApp } from './view/renderer.js'
+import type { JSX } from '@opentui/solid'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
 const NAME = 'dsh-tui'
@@ -30,7 +33,15 @@ const NAME = 'dsh-tui'
  */
 export async function runTui(): Promise<void> {
   installFailLoud(NAME)
-  loadEnv(NAME)
+  try {
+    loadEnv(NAME)
+  } catch (error: unknown) {
+    // Bun 1.3.14 lacks process.loadEnvFile; the app-boot loadEnv calls it and
+    // try/catches ENOENT but not the TypeError from a missing function. Bun
+    // loads .env natively, so the call is redundant under Bun; swallow the
+    // TypeError and let Bun's native .env populate process.env.
+    if (!(error instanceof TypeError)) throw error
+  }
 
   // Env wins over argv; empty values are absent (mirror tui-demo runner.ts:33-37).
   // DSH_SNAPSHOT=replay triggers resolveConfigPath to swap cordis.yml →
@@ -83,11 +94,18 @@ export async function runTui(): Promise<void> {
   async function disposeAndExit(code: number): Promise<void> {
     if (exiting) return
     exiting = true
+    // Restore the terminal: OpenTUI's renderer entered alt screen and hid the
+    // cursor; write the leave-alt-screen + show-cursor escape sequences.
+    process.stdout.write('\x1b[?1049l\x1b[?25h')
     try {
       await ctx.fiber.dispose()
     } finally {
       process.exit(code)
     }
+  }
+  /** Dispose + exit invoked from the onSubmit handler (exit/quit commands). */
+  async function disposeAndExitWithRenderer(code: number): Promise<void> {
+    await disposeAndExit(code)
   }
   process.on('SIGTERM', () => { void disposeAndExit(0) })
   process.on('SIGINT', () => { void disposeAndExit(130) })
@@ -101,6 +119,12 @@ export async function runTui(): Promise<void> {
   // resumes the stream on creation and lines are queued in the dispatcher
   // until drained. Never close inside a line handler (Phase 0 bug b).
   // Line-mode for Phase 1; raw-mode keypress is Phase 2.
+  // NOTE: under the OpenTUI render path, the <Prompt> component owns task
+  // input via onSubmit. The line dispatcher stays registered only for the
+  // approval/ask-user answerers, which push a pending question into the store
+  // and call awaitAnswer() instead of readLine() (OpenTUI raw mode breaks
+  // readline's line events). The dispatcher is kept for non-render fallback
+  // and its close() is still invoked on exit.
   const input = createLineInput({
     input: process.stdin,
     // output is REQUIRED for echo: with output omitted, Node's readline
@@ -147,14 +171,17 @@ export async function runTui(): Promise<void> {
   // session/event: (Session, SessionEvent) => void (session/src/index.ts:76).
   // The session filter stays valid across turns: the Session object is stable,
   // only turn numbers increment.
-  const assemblers = new Map<string, BlockAssembler>()
+  // OpenTUI <markdown streaming> does its own folding (per the design-confirm
+  // key decision #1, SKIP BlockAssembler for the markdown path), so events are
+  // pushed straight into the reactive store.
+  const store = createTuiStore()
   const disposeEvent = ctx.on('session/event', (session, event) => {
     if (session !== agent.session) return
-    renderEvent(event, assemblers)
+    store.push({ sessionId: session.id, event, view: undefined, type: 'session/event' })
   })
   const disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject !== agent) return
-    process.stdout.write(`[agent:${status}]\n`)
+    store.setStatus(status)
   })
 
   // Phase 1 additions over Phase 0: register the approval answerer and the
@@ -162,46 +189,55 @@ export async function runTui(): Promise<void> {
   // (fail-closed). Mirror api-proxy.ts:1338-1391 (in-process: no mux).
   // The services are optional: a composition without dsh-user-approval /
   // dsh-user-questions mounted simply skips the answerers (fail-closed stays).
+  // OpenTUI raw-mode conflict resolution (design-confirm): the answerers push
+  // a pending question into the store via awaitAnswer() and return its
+  // promise; the <Prompt> component resolves the answer via resolveAnswer()
+  // when the user submits a line in answer mode. The line dispatcher stays
+  // registered for non-render fallback but the answerers use the store.
   const disposeApproval = ctx.get('approval') === undefined
     ? () => {}
-    : registerApprovalAnswerer(ctx, { input })
+    : registerApprovalAnswerer(ctx, { store })
   const disposeQuestions = ctx.get('userQuestions') === undefined
     ? () => {}
-    : registerUserQuestionProvider(ctx, { input })
+    : registerUserQuestionProvider(ctx, { store })
 
   let exitCode = 0
   try {
-    process.stdout.write('task> ')
-    // REPL LOOP: read task line → followup (one new turn) → whenIdle (turn
-    // done) → flush → next line. The dispatcher routes lines during a turn to
-    // a pending approval/ask-user reader instead of the task queue, so answer
-    // lines are never replayed to the agent as fake tasks (single-owner
-    // routing — optimization note 2026-08-19 §3). null on EOF/Ctrl-D → exit 0.
-    for (;;) {
-      const line = await input.nextTaskLine()
-      if (line === null) break
-      const text = line.trim()
-      if (text === '') {
-        process.stdout.write('task> ')
-        continue
-      }
-      // Built-in REPL commands (line-mode Phase 1): exit/quit end the loop
-      // cleanly (exit 0) instead of being sent to the agent as a task line.
-      const cmd = text.toLowerCase()
+    // Boot the OpenTUI renderer (async: queries terminal DSR over stdin).
+    // The <Prompt> component owns the task input via onSubmit → agent.followup +
+    // whenIdle + flush. The readline REPL loop is replaced by the OpenTUI input.
+    const renderer = await createTuiRenderer()
+    // Dynamic import: tsdown/rolldown leaves this unresolved, and Bun.build
+    // (which produces lib/view/app.js) supplies it at runtime. The App module is
+    // JSX (tsdown cannot bundle Solid JSX), so it cannot be a static import.
+    // The `as` cast sidesteps tsc's --jsx-not-set resolution of the .tsx source;
+    // the module is type-checked separately by tsconfig.view.json.
+    const { createAppRoot } = await import('./view/app.js') as {
+      createAppRoot: (store: TuiStore, onSubmit: (text: string) => void) => () => JSX.Element
+    }
+    const onSubmit = (text: string): void => {
+      const trimmed = text.trim()
+      if (trimmed === '') return
+      // Built-in REPL commands: exit/quit end the loop cleanly (exit 0) instead
+      // of being sent to the agent as a task line.
+      const cmd = trimmed.toLowerCase()
       if (cmd === 'exit' || cmd === 'quit' || cmd === '/exit' || cmd === '/quit') {
-        process.stdout.write('bye\n')
-        break
+        void disposeAndExitWithRenderer(0)
+        return
       }
       agent.followup(createUserMessage({
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: trimmed }],
         source: { kind: 'user' },
       }))
-      await agent.whenIdle()
       // Per-turn flush for crash-safety (Phase 0/headless flush once because
       // one-shot; a REPL benefits from per-turn persistence).
-      await sessions.flush(agent.session)
-      process.stdout.write('task> ')
+      void agent.whenIdle().then(() => {
+        void sessions.flush(agent.session)
+      })
     }
+    await renderApp(createAppRoot(store, onSubmit), renderer)
+    // The render call blocks the fiber while the TUI runs; disposeAndExit is
+    // invoked from onSubmit (exit/quit) or SIGINT/SIGTERM.
   } catch (error: unknown) {
     exitCode = 1
     process.stderr.write(`${NAME}: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -211,84 +247,15 @@ export async function runTui(): Promise<void> {
     // out-of-tree; it is NOT invoked until the user confirms (solution note
     // risk #4: any capture must not bypass ai-cli idempotence).
     dryRunCapture(agent.session)
+    // Restore the terminal: OpenTUI's renderer entered alt screen and hid the
+    // cursor; write the leave-alt-screen + show-cursor escape sequences so a
+    // non-disposing exit does not leave the terminal in raw mode.
+    process.stdout.write('\x1b[?1049l\x1b[?25h')
     disposeEvent()
     disposeStatus()
     disposeApproval()
     disposeQuestions()
     input.close()
     await disposeAndExit(exitCode)
-  }
-}
-
-// ---- Minimal terminal renderer (raw process.stdout.write streaming) ----
-
-function stepKey(turn: number, step: number): string {
-  return `${turn}:${step}`
-}
-
-function getAssembler(assemblers: Map<string, BlockAssembler>, turn: number, step: number): BlockAssembler {
-  const key = stepKey(turn, step)
-  let asm = assemblers.get(key)
-  if (asm === undefined) {
-    asm = new BlockAssembler()
-    assemblers.set(key, asm)
-  }
-  return asm
-}
-
-/**
- * Render one session event to stdout.
- * @param event - the appended session event.
- * @param assemblers - per-step BlockAssembler map for chunk folding.
- */
-function renderEvent(event: SessionEvent, assemblers: Map<string, BlockAssembler>): void {
-  switch (event.type) {
-    case 'assistant/chunk': {
-      const { turn, step, chunk } = event.data
-      const asm = getAssembler(assemblers, turn, step)
-      asm.push(chunk)
-      if (chunk.type === 'text-delta') {
-        process.stdout.write(chunk.text)
-      }
-      break
-    }
-    case 'tool/call': {
-      const { name, arguments: raw } = event.data
-      let pretty: string
-      try {
-        pretty = JSON.stringify(JSON.parse(raw))
-      } catch {
-        pretty = raw
-      }
-      process.stdout.write(`\n[tool/call] ${name}(${pretty})\n`)
-      break
-    }
-    case 'tool/result': {
-      const [result] = event.data.message.content
-      const text = result.content
-        .map(block => block.type === 'text' ? block.text : '')
-        .join('')
-      const tag = result.isError === true ? 'ERR' : 'ok'
-      process.stdout.write(`[tool/result] [${tag}] ${text}\n`)
-      break
-    }
-    case 'assistant/message': {
-      const { turn, step, usage } = event.data
-      assemblers.delete(stepKey(turn, step))
-      const last = event.data.message.content.at(-1)
-      if (last !== undefined && last.type === 'text' && !last.text.endsWith('\n')) {
-        process.stdout.write('\n')
-      }
-      if (usage !== undefined) {
-        process.stdout.write(`[tokens: in=${usage.inputTokens} out=${usage.outputTokens}]\n`)
-      }
-      break
-    }
-    case 'turn/end': {
-      process.stdout.write(`\n[turn/end] ${event.data.reason.kind}\n`)
-      break
-    }
-    default:
-      break
   }
 }

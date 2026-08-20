@@ -46,6 +46,17 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@opentelemetry/otlp-exporter-base`](https://github.com/open-telemetry/opentelemetry-js) | Apache-2.0 |
 | [`@opentelemetry/resources`](https://github.com/open-telemetry/opentelemetry-js) | Apache-2.0 |
 | [`@opentelemetry/sdk-logs`](https://github.com/open-telemetry/opentelemetry-js) | Apache-2.0 |
+| [`@opentui/core`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-darwin-arm64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-darwin-x64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-linux-arm64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-linux-arm64-musl`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-linux-x64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-linux-x64-musl`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-win32-arm64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/core-win32-x64`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/keymap`](https://github.com/anomalyco/opentui) | MIT |
+| [`@opentui/solid`](https://github.com/anomalyco/opentui) | MIT |
 | [`@shikijs/langs`](https://github.com/shikijs/shiki) | MIT |
 | [`@standard-schema/spec`](https://github.com/standard-schema/standard-schema) | MIT |
 | [`@tanstack/react-virtual`](https://github.com/TanStack/virtual) | MIT |
@@ -83,6 +94,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`react-dom`](https://github.com/facebook/react) | MIT |
 | [`sharp`](https://github.com/lovell/sharp) | Apache-2.0 |
 | [`shiki`](https://github.com/shikijs/shiki) | MIT |
+| [`solid-js`](https://github.com/solidjs/solid) | MIT |
 | [`supports-color`](https://github.com/chalk/supports-color) | MIT |
 | [`tsx`](https://github.com/privatenumber/tsx) | MIT |
 | [`turndown`](https://github.com/mixmark-io/turndown) | MIT |

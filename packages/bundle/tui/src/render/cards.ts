@@ -40,6 +40,7 @@ const MAGENTA = SGR('35')
 /**
  * Render a tool-call card to a stdout block.
  * @param view - the pending call view (from `tool/call` event meta).
+ * @returns the ANSI-styled stdout block for the call card.
  */
 export function renderToolCall(view: ToolCallView): string {
   switch (view.card) {
@@ -56,6 +57,7 @@ export function renderToolCall(view: ToolCallView): string {
 /**
  * Render a tool-result card to a stdout block.
  * @param view - the completed call view (from `tool/result` event meta).
+ * @returns the ANSI-styled stdout block for the result card.
  */
 export function renderToolResult(view: ToolResultView): string {
   switch (view.card) {
