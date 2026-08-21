@@ -64,14 +64,12 @@
     "lib/view/store.js",
     "lib/view/renderer.js",
     "lib/view/app.js",
-    "lib/view/components/message.js",
-    "lib/view/components/tool-card.js",
-    "lib/view/components/projections.js",
-    "lib/view/components/prompt.js",
     "lib/types/**/*.d.ts"
   ],
   "scripts": {
-    "build:view": "bun scripts/build-view.ts"
+    "build:view": "bun scripts/build-view.ts",
+    "prepare": "bun scripts/build-view.ts",
+    "prepublishOnly": "tsx scripts/verify-published-artifacts.ts"
   },
   "license": "MIT",
   "dependencies": {

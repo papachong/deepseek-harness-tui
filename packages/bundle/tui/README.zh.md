@@ -4,6 +4,20 @@
 
 dsh 终端 UI bundle：一个多轮 in-process TUI REPL，跑在 agent spine 之上，带审批与 ask-user answerer，无 Host、HTTP server 或浏览器层。发布的 `dsh-tui` bin 启动外部 `cordis.yml`，读 stdin 行，每行驱动一轮 agent turn，把流式 assistant 文本 + 工具行渲染到 stdout，并从 stdin 回答审批/ask-user 提示。它是 standalone bin——不注册进 `PROFILE_TEMPLATES`——故不增加 in-tree core 编辑（见[上游跟随策略](../../../.agents/notes/proposed/architecture/2026-08-18-tui-solution-and-dev-plan.md)）。
 
+## 运行时：Bun
+
+`dsh-tui` bin 需要 **Bun** 运行时：OpenTUI 的 `bun:ffi` 加载绘制终端的平台 `.so`/`.dylib`/`.dll`，该 FFI 仅 Bun 可用。bin shebang 是 `#!/usr/bin/env node`（工具兼容性），但在 Node 下启动会在首个 FFI 调用崩溃。
+
+显式用 Bun 运行：
+
+```sh
+bun $(which dsh-tui)
+bunx --bun dsh-tui
+bun lib/bin.js
+```
+
+设 `DSH_CORDIS_CONFIG` 或把配置路径作为 `argv[2]` 传入以指向外部 `cordis.yml`。view 层的 `lib/view/app.js` 由 `Bun.build` 产出（见 `scripts/build-view.ts`）；tsdown 无法编译 Solid JSX，`@opentui/solid` 的 transform 插件仅 Bun 可用。
+
 ## 配置发现
 
 第一个非空通道胜出：`$DSH_CORDIS_CONFIG`，其次位置参数 `argv[2]`。若两者均未指向已存在文件，bin 向 stderr 打印一行用法并以 exit 1 退出。设 `DSH_SNAPSHOT=replay` 可将同目录的 `cordis.yml` 换成 `cordis.snapshot.yml`，实现 keyless llm-replay（无需 `DEEPSEEK_API_KEY`）。`DSH_SESSION_ROOT` 覆盖 JSONL backend 根；`DSH_CWD` 覆盖 bash/filesystem 的 cwd。

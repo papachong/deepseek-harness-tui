@@ -4,6 +4,20 @@ English | [中文](README.zh.md)
 
 The dsh terminal UI bundle: a multi-turn in-process TUI REPL over the agent spine with approval and ask-user answerers, no Host, HTTP server, or browser layer. The published `dsh-tui` bin boots an external `cordis.yml`, reads stdin lines, drives one agent turn per line, renders streaming assistant text + tool lines to stdout, and answers approval/ask-user prompts from stdin. It is a standalone bin — not registered in `PROFILE_TEMPLATES` — so it adds no in-tree core edit (per the [upstream-follow strategy](../../../.agents/notes/proposed/architecture/2026-08-18-tui-solution-and-dev-plan.md)).
 
+## Runtime: Bun
+
+The `dsh-tui` bin requires the **Bun** runtime: OpenTUI's `bun:ffi` loads the platform `.so`/`.dylib`/`.dll` that draws the terminal, and that FFI is Bun-only. The bin shebang is `#!/usr/bin/env node` for tooling compatibility, but launching it under Node crashes at the first FFI call.
+
+Run it under Bun explicitly:
+
+```sh
+bun $(which dsh-tui)
+bunx --bun dsh-tui
+bun lib/bin.js
+```
+
+Set `DSH_CORDIS_CONFIG` or pass a config path as `argv[2]` to point at an external `cordis.yml`. The view layer's `lib/view/app.js` is produced by `Bun.build` (see `scripts/build-view.ts`); tsdown cannot compile Solid JSX, and `@opentui/solid`'s transform plugin is Bun-only.
+
 ## Config discovery
 
 The first non-empty channel wins: `$DSH_CORDIS_CONFIG`, then positional `argv[2]`. If neither names an existing file, the bin prints one-line usage to stderr and exits 1. Set `DSH_SNAPSHOT=replay` to swap `cordis.yml` → `cordis.snapshot.yml` in the same directory for keyless llm-replay (no `DEEPSEEK_API_KEY`). `DSH_SESSION_ROOT` overrides the JSONL backend root; `DSH_CWD` overrides the bash/filesystem cwd.
