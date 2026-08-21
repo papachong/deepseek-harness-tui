@@ -15,7 +15,10 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type { ScopeKey } from '@deepseek-ai/dsh-scope'
+import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type { ToolEventView } from './transport/event-source.js'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
 import { createTuiStore, type TuiStore } from './view/store.js'
@@ -24,6 +27,53 @@ import type { JSX } from '@opentui/solid'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
 const NAME = 'dsh-tui'
+
+/**
+ * Compute the host-side render intent (callView/resultView) for a tool event,
+ * mirroring `api-proxy.ts:689-725 viewFor`. The runner calls
+ * `ToolRuntime.get(name, scope)?.presentCall`/`presentResult` so the store's
+ * `callView`/`resultView` carry the tool-specific card (terminal/diff/read/
+ * search/web) instead of the generic fallback. Presenters are pure and may
+ * throw on stale/unparseable args; any error soft-falls to `undefined` (the
+ * event still ships, just without a view) so delivery is never blocked.
+ * @param tools - the ToolRuntime service, or undefined when not mounted.
+ * @param event - the session event (tool/call or tool/result).
+ * @param argsFor - resolves a callId to its recorded {name,args} (back-scan).
+ * @param scope - the agent (a ScopeKey) scoping the tool lookup to its preset.
+ * @returns the ToolEventView, or undefined when no presenter attached one.
+ */
+function viewFor(
+  tools: ToolRuntime | undefined,
+  event: SessionEvent,
+  argsFor: (callId: string) => { name: string; args: unknown } | undefined,
+  scope?: ScopeKey,
+): ToolEventView | undefined {
+  if (tools === undefined) return undefined
+  try {
+    if (event.type === 'tool/call') {
+      const { name, arguments: raw } = event.data
+      const view = tools.get(name, scope)?.presentCall?.(JSON.parse(raw))
+      return view === undefined ? undefined : { for: 'call', view }
+    }
+    if (event.type === 'tool/result') {
+      const { message, meta } = event.data
+      const [result] = message.content
+      const callId = message.source.callId
+      const call = argsFor(callId)
+      if (call === undefined) return undefined
+      const view = tools.get(call.name, scope)?.presentResult?.(call.args, {
+        content: result.content,
+        isError: result.isError === true,
+        ...meta === undefined ? {} : { meta },
+      })
+      return view === undefined ? undefined : { for: 'result', view }
+    }
+  } catch {
+    // A throwing presenter (or unparseable arguments) must not break delivery;
+    // the event still ships, just without a view.
+  }
+  return undefined
+}
 
 /**
  * Boot the selected external configuration, drive a multi-turn REPL, and own
@@ -171,9 +221,27 @@ export async function runTui(): Promise<void> {
   // key decision #1, SKIP BlockAssembler for the markdown path), so events are
   // pushed straight into the reactive store.
   const store = createTuiStore()
+  // Tool registry: compute host-side render intent (callView/resultView) via
+  // presentCall/presentResult, mirroring api-proxy.ts:689-725 viewFor. The
+  // agent is a ScopeKey (agent-loop/src/agent.ts:94), so passing it scopes the
+  // tool lookup to the agent's preset chain. A parallel callId→{name,args} map
+  // avoids the store-flush race (tool/result may arrive before the batched
+  // tool/call commits to state.tools).
+  const tools = ctx.get('tools')
+  const callArgs = new Map<string, { name: string; args: unknown }>()
   const disposeEvent = ctx.on('session/event', (session, event) => {
     if (session !== agent.session) return
-    store.push({ sessionId: session.id, event, view: undefined, type: 'session/event' })
+    // Record the call's name+args synchronously on tool/call so tool/result
+    // (which carries only callId) can back-resolve without waiting for the
+    // store flush.
+    if (event.type === 'tool/call') {
+      const { name, arguments: raw, callId } = event.data
+      let parsed: unknown
+      try { parsed = JSON.parse(raw) } catch { parsed = raw }
+      callArgs.set(callId, { name, args: parsed })
+    }
+    const view = viewFor(tools, event, id => callArgs.get(id), agent)
+    store.push({ sessionId: session.id, event, view, type: 'session/event' })
   })
   const disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject !== agent) return

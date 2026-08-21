@@ -13,6 +13,17 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools/presentation'
+
+/**
+ * A host-computed render-intent view, mirroring
+ * `@deepseek-ai/dsh-host-apiproxy/api`'s `ToolEventView`. Defined locally so
+ * the TUI does not depend on the host BFF package; the in-process runner
+ * computes the same shape from `ToolRuntime.presentCall`/`presentResult`.
+ */
+export type ToolEventView =
+  | { for: 'call'; view: ToolCallView }
+  | { for: 'result'; view: ToolResultView }
 
 /** A normalized event the render layer consumes, regardless of transport. */
 export interface TransportEvent {
@@ -20,8 +31,8 @@ export interface TransportEvent {
   sessionId: string
   /** The session event, or undefined for a non-session-event mux frame. */
   event: SessionEvent | undefined
-  /** A host-computed render-intent view, when the BFF attached one. */
-  view: unknown
+  /** A host-computed render-intent view, when the BFF or runner attached one. */
+  view: ToolEventView | undefined
   /** The mux frame type for non-session frames (approval/question). */
   type: string | undefined
 }
@@ -52,7 +63,7 @@ export class BffSseTransport {
   connect(listener: TransportListener): void {
     this.source = new EventSource(this.url)
     this.source.addEventListener('message', (msg: MessageEvent) => {
-      const frame = JSON.parse(msg.data as string) as { type: string; sessionId?: string; event?: SessionEvent; view?: unknown }
+      const frame = JSON.parse(msg.data as string) as { type: string; sessionId?: string; event?: SessionEvent; view?: ToolEventView }
       listener({
         sessionId: frame.sessionId ?? '',
         event: frame.event,

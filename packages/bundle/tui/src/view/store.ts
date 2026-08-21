@@ -322,8 +322,14 @@ function applyEvent(
       const { turn, step, callId, name, arguments: raw } = event.data
       const seq = event.seq
       const idx = state.tools.findIndex(t => t.callId === callId)
+      // The runner's viewFor may have attached a host-computed callView via
+      // transport.view (presentCall result); carry it onto the entry.
+      const callView = transport.view !== undefined && transport.view.for === 'call'
+        ? transport.view.view
+        : undefined
       const entry: ToolEntry = {
         callId, name, turn, step, seq, arguments: raw, state: 'pending',
+        ...callView === undefined ? {} : { callView },
       }
       if (idx === -1) {
         setState('tools', state.tools.length, entry)
@@ -341,6 +347,11 @@ function applyEvent(
         .map(b => b.text)
         .join('')
       const isError = block.isError === true
+      // The runner's viewFor may have attached a host-computed resultView via
+      // transport.view (presentResult result); carry it onto the entry.
+      const resultView = transport.view !== undefined && transport.view.for === 'result'
+        ? transport.view.view
+        : undefined
       // Correlate by callId (stable per call), not turn+step (ambiguous when
       // one step makes several tool calls).
       const idx = state.tools.findIndex(t => t.callId === callId)
@@ -348,12 +359,14 @@ function applyEvent(
         setState('tools', idx, 'state', 'completed')
         setState('tools', idx, 'resultText', resultText)
         setState('tools', idx, 'isError', isError)
+        if (resultView !== undefined) setState('tools', idx, 'resultView', resultView)
       } else {
         // Result without a preceding tool/call (e.g. replay starting mid-step):
         // synthesize a completed entry so the card still renders.
         setState('tools', state.tools.length, {
           callId, name: '', turn, step, seq: event.seq,
           arguments: '', state: 'completed', resultText, isError,
+          ...resultView === undefined ? {} : { resultView },
         })
       }
       break

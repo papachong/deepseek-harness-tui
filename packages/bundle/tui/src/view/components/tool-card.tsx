@@ -1,15 +1,17 @@
 /**
  * The `<ToolCard>` component: renders one {@link ToolEntry} with a status icon
  * (animated spinner while pending, `✓` on success, `✗` on error), a parameter
- * preview, and a result body. The body dispatches on render intent when the
- * host computed a `resultView` (diff → `+`/`-` coloring); v1 falls through to
- * generic raw text for all other intents (terminal/read/search/web).
+ * preview, and a result body. The body dispatches on the host-computed
+ * `callView`/`resultView` (filled by the runner's `viewFor` →
+ * `presentCall`/`presentResult`): `terminal`/`diff`/`read`/`search`/`web` get
+ * specialized rendering; when no view is present, the generic arm renders the
+ * raw result text with diff-style `+`/`-` coloring.
  *
  * Mirrors opencode's InlineTool/BlockTool: a compact titled header with
  * spinner/status glyph plus a padded body. The host computes render intent via
  * the tool registry's `presentCall`/`presentResult`; this component does NOT
- * call presenters itself (the store has no tool registry, so `callView`/
- * `resultView` are absent in v1 and the generic arm handles everything).
+ * call presenters itself (it reads the precomputed `callView`/`resultView`
+ * the store carries on the entry).
  *
  * NOTE: uses memo-conditionals instead of `<Show>` — the OpenTUI Solid
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch that
@@ -19,12 +21,21 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createMemo } from 'solid-js'
+import { createMemo, createSignal, For } from 'solid-js'
+import type {
+  DiffResultView,
+  ReadResultView,
+  SearchMatchesResultView,
+  SearchPathsResultView,
+  TerminalResultView,
+  WebFetchResultView,
+  WebSearchResultView,
+} from '@deepseek-ai/dsh-tools/presentation'
 import { STATUS_COLORS, STATUS_GLYPH, CHROME } from '../theme.js'
 import { Spinner } from './spinner.js'
 import type { ToolEntry } from '../store.js'
 
-/** Maximum lines of result text to render inline before truncating. */
+/** Maximum lines of generic result text to render inline before truncating. */
 const MAX_RESULT_LINES = 8
 
 /** Props for {@link ToolCard}. */
@@ -35,9 +46,9 @@ export interface ToolCardProps {
 
 /**
  * Render one tool call as a titled card. The header line carries the status
- * glyph (spinner/✓/✗) + tool name + a dim arguments preview. The body is the
- * result text (or a pending placeholder), colored red on error. Long results
- * truncate to {@link MAX_RESULT_LINES} lines.
+ * glyph (spinner/✓/✗) + tool name + a dim arguments preview. The body
+ * dispatches on `resultView.card` when the host attached a render intent;
+ * otherwise the generic arm renders the raw result text.
  * @param props - the tool-card props.
  * @returns the JSX element for the tool card.
  */
@@ -47,13 +58,19 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   const hasResult = createMemo(() =>
     props.tool.state === 'completed' && props.tool.resultText !== undefined,
   )
+  // Collapsed state for long results; click-like toggle via a signal the
+  // header owns (OpenTUI has no click on <text>, so this stays a render-time
+  // truncation toggle controlled by MAX_RESULT_LINES).
+  const [expanded, setExpanded] = createSignal(false)
   const glyphColor = createMemo(() =>
     isPending() ? STATUS_COLORS.completed : isError() ? STATUS_COLORS.error : STATUS_COLORS.completed,
   )
 
   const header = createMemo<JSX.Element>(() => (
     <box flexDirection="row">
-      {isPending() ? <Spinner fg={STATUS_COLORS.pending} /> : <text fg={glyphColor()}><b>{STATUS_GLYPH[isError() ? 'error' : 'completed']}</b></text>}
+      {isPending()
+        ? <Spinner fg={STATUS_COLORS.pending} />
+        : <text fg={glyphColor()}><b>{STATUS_GLYPH[isError() ? 'error' : 'completed']}</b></text>}
       <text fg={CHROME.text}><b> {props.tool.name}</b></text>
       {props.tool.arguments ? <text fg={CHROME.textMuted}> {previewArgs(props.tool.arguments)}</text> : undefined}
     </box>
@@ -61,10 +78,22 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
 
   const body = createMemo<JSX.Element>(() => {
     if (isPending()) return <text fg={CHROME.textMuted}>running…</text>
-    if (hasResult()) {
-      return renderResult(props.tool.resultText ?? '', isError())
+    if (!hasResult()) return undefined
+    // Dispatch on the host-computed resultView when present.
+    const view = props.tool.resultView
+    if (view !== undefined) {
+      switch (view.card) {
+        case 'terminal': return renderTerminalResult(view)
+        case 'diff': return renderDiffResult(view)
+        case 'search': return renderSearchResult(view)
+        case 'read': return renderReadResult(view)
+        case 'web': return renderWebResult(view)
+        case 'generic':
+        default: return renderGenericResult(view.title, props.tool.resultText ?? '', isError(), expanded(), setExpanded)
+      }
     }
-    return undefined
+    // No view: generic raw text with diff-style coloring.
+    return renderGenericResult(undefined, props.tool.resultText ?? '', isError(), expanded(), setExpanded)
   })
 
   return (
@@ -83,24 +112,187 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
 }
 
 /**
- * Render the result body. v1 does not specialize terminal/diff/read/search/web
- * — all results render as truncated text, red when the tool reported an error.
- * When a host-computed `resultView` carries a `diff` intent, the `+`/`-` lines
- * color green/red; this branch can later widen without changing the call site.
+ * Render a generic result: truncated raw text, red on error, with a
+ * `+`/`-` diff-style line coloring. Long results collapse to
+ * {@link MAX_RESULT_LINES} lines with a "… N more" toggle hint.
+ * @param title - optional title from the view.
  * @param resultText - the raw text to render.
- * @param isError - whether the tool reported an error (red text).
- * @returns the JSX element for the result body, or undefined when no text.
+ * @param isError - whether the tool reported an error.
+ * @param expanded - whether the collapse toggle is expanded.
+ * @param setExpanded - toggle function for the collapse hint.
+ * @returns the JSX element for the generic result body.
  */
-function renderResult(resultText: string, isError: boolean): JSX.Element {
+function renderGenericResult(
+  title: string | undefined,
+  resultText: string,
+  isError: boolean,
+  expanded: boolean,
+  _setExpanded: (v: boolean) => void,
+): JSX.Element {
   const lines = resultText.split('\n')
-  const truncated = lines.length > MAX_RESULT_LINES
-  const shown = truncated ? lines.slice(0, MAX_RESULT_LINES) : lines
+  const limit = expanded ? lines.length : MAX_RESULT_LINES
+  const truncated = lines.length > MAX_RESULT_LINES && !expanded
+  const shown = truncated ? lines.slice(0, limit) : lines
   return (
     <box>
-      {shown.map(line => (
-        <text fg={isError ? STATUS_COLORS.error : diffLineColor(line)}>{line}</text>
-      ))}
-      {truncated ? <text fg={CHROME.textMuted}>… +{lines.length - MAX_RESULT_LINES} more lines</text> : undefined}
+      {title !== undefined ? <text fg={CHROME.textMuted}>{title}</text> : undefined}
+      <For each={shown}>
+        {(line: string) => <text fg={isError ? STATUS_COLORS.error : diffLineColor(line)}>{line}</text>}
+      </For>
+      {lines.length > MAX_RESULT_LINES
+        ? (
+          <text fg={CHROME.textMuted}>
+            {truncated ? `… +${lines.length - MAX_RESULT_LINES} more [toggle]` : '▼ collapse [toggle]'}
+          </text>
+        )
+        : undefined}
+    </box>
+  )
+}
+
+/**
+ * Render a terminal result: exit/signal status badge + the captured output.
+ * @param view - the terminal result view.
+ * @returns the JSX element for the terminal result body.
+ */
+function renderTerminalResult(view: TerminalResultView): JSX.Element {
+  const exitColor = view.exitCode === undefined
+    ? STATUS_COLORS.error
+    : view.exitCode === 0 ? STATUS_COLORS.completed : STATUS_COLORS.error
+  const status = view.exitCode === undefined
+    ? view.signal === undefined ? '' : `[${view.signal}]`
+    : `[exit ${view.exitCode}]`
+  const output = view.output ?? ''
+  const lines = output === '' ? [] : output.split('\n').slice(0, MAX_RESULT_LINES)
+  return (
+    <box>
+      <text fg={exitColor}><b>{status}</b></text>
+      <For each={lines}>{(line: string) => <text fg={CHROME.text}>{line}</text>}</For>
+    </box>
+  )
+}
+
+/**
+ * Render a diff result: each FileDiff as `+`/`-` colored lines with a path
+ * header. A simple line-level diff (removed then added) — a full LCS is
+ * deferred (the view carries oldText/newText only).
+ * @param view - the diff result view.
+ * @returns the JSX element for the diff result body.
+ */
+function renderDiffResult(view: DiffResultView): JSX.Element {
+  return (
+    <box>
+      {view.title !== undefined ? <text fg={CHROME.textMuted}>{view.title}</text> : undefined}
+      <For each={view.diffs}>
+        {(diff) => {
+          const oldLines = diff.oldText === null ? [] : diff.oldText.split('\n')
+          const newLines = diff.newText.split('\n')
+          const max = Math.max(oldLines.length, newLines.length)
+          const rows: JSX.Element[] = []
+          rows.push(<text fg="#22d3ee">--- {diff.path}</text>)
+          for (let i = 0; i < max; i++) {
+            const oldLine = oldLines[i]
+            const newLine = newLines[i]
+            if (oldLine !== undefined && newLine !== undefined && oldLine === newLine) {
+              rows.push(<text fg={CHROME.text}> {oldLine}</text>)
+            } else {
+              if (oldLine !== undefined) rows.push(<text fg={STATUS_COLORS.error}>-{oldLine}</text>)
+              if (newLine !== undefined) rows.push(<text fg={STATUS_COLORS.completed}>+{newLine}</text>)
+            }
+          }
+          return <box>{rows}</box>
+        }}
+      </For>
+    </box>
+  )
+}
+
+/**
+ * Render a search result: matches (file → line hits) or paths list, with a
+ * total/truncated summary.
+ * @param view - the search result view (matches or paths shape).
+ * @returns the JSX element for the search result body.
+ */
+function renderSearchResult(view: SearchMatchesResultView | SearchPathsResultView): JSX.Element {
+  if (view.shape === 'matches') {
+    return (
+      <box>
+        <text fg={CHROME.textMuted}>{view.title ?? 'search'} ({view.total} matches{view.truncated ? ', truncated' : ''})</text>
+        <For each={view.files}>
+          {file => (
+            <box>
+              <text fg="#c678dd">{file.path}</text>
+              <For each={file.matches}>
+                {match => (
+                  <box flexDirection="row">
+                    <text fg={CHROME.textMuted}>  {match.lineNumber}: </text>
+                    <text fg={CHROME.text}>{match.line}</text>
+                  </box>
+                )}
+              </For>
+            </box>
+          )}
+        </For>
+      </box>
+    )
+  }
+  return (
+    <box>
+      <text fg={CHROME.textMuted}>{view.title ?? 'search'} ({view.total} paths{view.truncated ? ', truncated' : ''})</text>
+      <For each={view.paths}>{(p: string) => <text fg={CHROME.text}>  {p}</text>}</For>
+    </box>
+  )
+}
+
+/**
+ * Render a read result: the file path header + numbered lines.
+ * @param view - the read result view.
+ * @returns the JSX element for the read result body.
+ */
+function renderReadResult(view: ReadResultView): JSX.Element {
+  return (
+    <box>
+      <text fg="#22d3ee"><b>{view.path}</b></text>
+      <For each={view.lines}>
+        {line => (
+          <box flexDirection="row">
+            <text fg={CHROME.textMuted}>{String(line.number).padStart(4)} </text>
+            <text fg={CHROME.text}>{line.text}</text>
+          </box>
+        )}
+      </For>
+    </box>
+  )
+}
+
+/**
+ * Render a web result: search (sources + answer) or fetch (url + status).
+ * @param view - the web result view (search or fetch kind).
+ * @returns the JSX element for the web result body.
+ */
+function renderWebResult(view: WebSearchResultView | WebFetchResultView): JSX.Element {
+  if (view.kind === 'search') {
+    return (
+      <box>
+        <text fg={CHROME.textMuted}>{view.title ?? 'web search'}{view.truncated ? ' (truncated)' : ''}</text>
+        {view.answer !== undefined ? <text fg={CHROME.text}>{view.answer}</text> : undefined}
+        <For each={view.sources}>
+          {source => (
+            <box>
+              <text fg="#22d3ee">{source.title ?? source.url}</text>
+              <text fg={CHROME.textMuted}>  {source.url}</text>
+              {source.snippet !== undefined ? <text fg={CHROME.textMuted}>  {source.snippet}</text> : undefined}
+            </box>
+          )}
+        </For>
+      </box>
+    )
+  }
+  return (
+    <box>
+      <text fg={CHROME.textMuted}>web fetch</text>
+      <text fg="#22d3ee">{view.url}</text>
+      <text fg={CHROME.textMuted}>  ({view.statusCode}{view.truncated ? ', truncated' : ''})</text>
     </box>
   )
 }
