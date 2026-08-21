@@ -23,11 +23,17 @@ import { render, type JSX } from '@opentui/solid'
 /**
  * The native library file name per platform: `.so` on linux, `.dylib` on
  * darwin, `.dll` on win32. Matches the file the platform package ships.
+ *
+ * NOTE: the win32 package ships `opentui.dll` (no `lib` prefix), while linux
+ * and darwin ship `libopentui.{so,dylib}`. OpenTUI's own
+ * `resolveNativeLibraryPath` / `setRenderLibPath` handles this naming when
+ * called directly, but `findNativeLibInStore` walks the pnpm store and must
+ * know the exact file name to stat.
  */
 const NATIVE_FILE_NAMES: Record<string, string> = {
   linux: 'libopentui.so',
   darwin: 'libopentui.dylib',
-  win32: 'libopentui.dll',
+  win32: 'opentui.dll',
 }
 
 /**
