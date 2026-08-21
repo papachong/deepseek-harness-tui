@@ -51,6 +51,12 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      # Bun builds the dsh-tui OpenTUI view layer (src/view/*.tsx → lib/view/*.js)
+      # via Bun.build + @opentui/solid/bun-plugin. tsdown cannot compile Solid
+      # JSX, and the @opentui FFI is Bun-only. The release tarball ships
+      # lib/view/*.js (files[] whitelist), so the release lane must install Bun.
+      - uses: oven-sh/setup-bun@v2
+
       - name: Configure pnpm store path
         id: pnpm-store
         run: |
