@@ -23,6 +23,7 @@ import { registerApprovalAnswerer, registerUserQuestionProvider } from './answer
 import { dryRunCapture } from './capture.ts'
 import { createTuiStore, type TuiStore } from './view/store.js'
 import { createTuiRenderer, renderApp } from './view/renderer.js'
+import { theme, themeNames, switchTheme } from './view/theme.js'
 import type { JSX } from '@opentui/solid'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
@@ -287,6 +288,18 @@ export async function runTui(): Promise<void> {
       const cmd = trimmed.toLowerCase()
       if (cmd === 'exit' || cmd === 'quit' || cmd === '/exit' || cmd === '/quit') {
         void disposeAndExitWithRenderer(0)
+        return
+      }
+      // /theme <name>: swap the active color theme at runtime. No agent round-trip.
+      if (cmd.startsWith('/theme')) {
+        const arg = trimmed.slice('/theme'.length).trim()
+        if (arg === '') {
+          process.stdout.write(`themes: ${themeNames().join(', ')} (active: ${theme().name})\n`)
+        } else if (switchTheme(arg)) {
+          process.stdout.write(`theme: ${arg}\n`)
+        } else {
+          process.stdout.write(`unknown theme: ${arg}; available: ${themeNames().join(', ')}\n`)
+        }
         return
       }
       agent.followup(createUserMessage({

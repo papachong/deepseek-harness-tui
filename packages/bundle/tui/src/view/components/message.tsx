@@ -18,9 +18,16 @@
 
 import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal } from 'solid-js'
-import { ROLE_COLORS, ROLE_PREFIX, CHROME, SYNTAX_THEME, STATUS_COLORS } from '../theme.js'
+import { ROLE_COLORS, ROLE_PREFIX, CHROME, buildSyntaxStyle, STATUS_COLORS } from '../theme.js'
 import { Spinner } from './spinner.js'
 import type { MessageEntry } from '../store.js'
+
+/**
+ * Module-level cached {@link SyntaxStyle}. Built once from the active theme's
+ * syntax map; a theme swap would rebuild it. The native handle is an FFI
+ * resource, so recreating it per render would leak and stall.
+ */
+const SYNTAX_STYLE = buildSyntaxStyle()
 
 /** Props for {@link Message}. */
 export interface MessageProps {
@@ -92,7 +99,7 @@ export function Message(props: MessageProps): JSX.Element {
           internalBlockMode="top-level"
           content={props.entry.text}
           tableOptions={{ style: 'grid' }}
-          syntaxStyle={SYNTAX_THEME}
+          syntaxStyle={SYNTAX_STYLE}
           conceal
         />
         {props.entry.streaming ? <text fg={borderColor()}>▋</text> : undefined}
