@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { delimiter, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import {
   CLIENT_BUILD_RECORD_PATH,
@@ -33,17 +33,43 @@ function runScript(script: string, environment: NodeJS.ProcessEnv): void {
  * Resolve the Bun executable from PATH. `command -v bun` is a shell builtin
  * (not spawnable via `spawnSync`), so walk `$PATH` entries for a `bun` binary
  * with the executable bit. Returns the absolute path, or undefined when absent.
+ *
+ * On Windows the binary is `bun.exe`; on POSIX it is `bun`. The PATH delimiter
+ * is `;` on Windows and `:` on POSIX — `node:path.delimiter` picks the right
+ * one. Bun ships under `~/.bun/bin` (POSIX) or `%USERPROFILE%\.bun\bin\bun-windows-x64`
+ * (Windows zip install); neither is on PATH by default at process start, so
+ * the walker also probes the well-known `~/.bun/bin` location when the PATH
+ * walk finds nothing.
  */
 function resolveBun(environment: NodeJS.ProcessEnv): string | undefined {
   const pathEnv = environment['PATH']
-  if (pathEnv === undefined || pathEnv === '') return undefined
-  for (const dir of pathEnv.split(':')) {
-    if (dir === '') continue
-    const candidate = resolve(dir, 'bun')
-    try {
-      if (existsSync(candidate)) return candidate
-    } catch {
-      // unreadable PATH entry — keep walking
+  const exeSuffix = process.platform === 'win32' ? '.exe' : ''
+  if (pathEnv !== undefined && pathEnv !== '') {
+    for (const dir of pathEnv.split(delimiter)) {
+      if (dir === '') continue
+      const candidate = resolve(dir, `bun${exeSuffix}`)
+      try {
+        if (existsSync(candidate)) return candidate
+      } catch {
+        // unreadable PATH entry — keep walking
+      }
+    }
+  }
+  // Fallback: probe the well-known Bun install location when the PATH walk
+  // finds nothing (Bun's installer persists the dir to the user shell rc, but
+  // a non-login spawnSync child does not source it).
+  const home = environment['USERPROFILE'] ?? environment['HOME']
+  if (home !== undefined && home !== '') {
+    const fallbackDirs = process.platform === 'win32'
+      ? [resolve(home, '.bun', 'bin', 'bun-windows-x64'), resolve(home, '.bun', 'bin')]
+      : [resolve(home, '.bun', 'bin')]
+    for (const dir of fallbackDirs) {
+      const candidate = resolve(dir, `bun${exeSuffix}`)
+      try {
+        if (existsSync(candidate)) return candidate
+      } catch {
+        // unreadable fallback dir — keep walking
+      }
     }
   }
   return undefined
