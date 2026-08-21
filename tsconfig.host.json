@@ -196,6 +196,7 @@
     { "path": "./packages/core/agent-loop" },
     { "path": "./packages/llm/llm-retry" },
     { "path": "./packages/examples/agent-spine-demo" },
+    { "path": "./packages/examples/tui-demo" },
     { "path": "./packages/subprocess/subprocess" },
     { "path": "./packages/subprocess/subprocess-local" },
     { "path": "./packages/e2b/e2b" },
