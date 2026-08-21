@@ -23,7 +23,7 @@
 
 import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal, type Accessor } from 'solid-js'
-import type { InputRenderable } from '@opentui/core'
+import type { InputRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
 
@@ -57,10 +57,53 @@ export function Prompt(props: PromptProps): JSX.Element {
 
   const handleSubmit = (value: string): void => {
     if (props.store.resolveAnswer(value)) return
+    recordHistory(value)
     props.onSubmit(value)
   }
 
   const [inputEl, setInputEl] = createSignal<InputRenderable | undefined>(undefined)
+  // Session-scoped input history: ↑/↓ navigates previously submitted lines.
+  // Stored in a signal array local to this Prompt instance (one per process,
+  // matching the single-session TUI). `cursor` is the index into history while
+  // navigating; `null` means "at the live input" (not navigating).
+  const [history, setHistory] = createSignal<string[]>([])
+  let historyCursor: number | null = null
+  let draftBeforeNav = ''
+
+  const navigateHistory = (direction: 'up' | 'down'): void => {
+    const el = inputEl()
+    if (el === undefined) return
+    const items = history()
+    if (items.length === 0) return
+    if (direction === 'up') {
+      if (historyCursor === null) {
+        historyCursor = items.length - 1
+        draftBeforeNav = el.value
+      } else if (historyCursor > 0) {
+        historyCursor -= 1
+      } else {
+        return
+      }
+      el.value = items[historyCursor] ?? ''
+    } else {
+      if (historyCursor === null) return
+      if (historyCursor >= items.length - 1) {
+        historyCursor = null
+        el.value = draftBeforeNav
+      } else {
+        historyCursor += 1
+        el.value = items[historyCursor] ?? ''
+      }
+    }
+  }
+
+  const recordHistory = (line: string): void => {
+    const trimmed = line.trim()
+    if (trimmed === '') return
+    setHistory(prev => trimmed === prev[prev.length - 1] ? prev : [...prev, trimmed])
+    historyCursor = null
+    draftBeforeNav = ''
+  }
 
   const banner = createMemo<JSX.Element>(() => {
     const question = props.store.pendingQuestion()
@@ -83,6 +126,15 @@ export function Prompt(props: PromptProps): JSX.Element {
           ref={(el: InputRenderable) => { setInputEl(el) }}
           focused
           placeholder={placeholder()}
+          onKeyDown={(key: KeyEvent) => {
+            if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
+              navigateHistory('up')
+              key.preventDefault()
+            } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
+              navigateHistory('down')
+              key.preventDefault()
+            }
+          }}
           onSubmit={() => {
             const value = inputEl()?.value ?? ''
             handleSubmit(value)
