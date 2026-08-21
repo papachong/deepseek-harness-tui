@@ -11,9 +11,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { execa } from 'execa'
 
 /** A marker-gated terminal input action. */
@@ -121,7 +119,12 @@ function resolveBun(environment: NodeJS.ProcessEnv): string {
  * @returns the complete PTY output bytes (as a string).
  */
 export async function runTuiPtySmoke(options: TuiPtySmokeOptions): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), options.tempDirPrefix))
+  // The bin dynamically imports ./view/app.js which externalizes solid-js +
+  // @opentui/* — those resolve from the TUI package's node_modules. Run the
+  // bin from its own package dir (where node_modules lives), NOT from a
+  // mkdtemp temp dir (which has no node_modules → the dynamic import fails).
+  // The temp dir is only for the session workspace ($DSH_HOME etc.) if needed.
+  const cwd = resolve(options.binPath, '..', '..')
   const timeoutMs = options.timeoutMs ?? 30_000
   try {
     const bun = resolveBun(process.env)
@@ -152,6 +155,6 @@ export async function runTuiPtySmoke(options: TuiPtySmokeOptions): Promise<strin
     }
     return result.stdout
   } finally {
-    await rm(cwd, { recursive: true, force: true })
+    // No temp dir to clean (cwd is the package dir).
   }
 }

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-20-tui-opentui-view-layer-implemented.md
-2026-08-20-tui-opentui-view-layer-implemented.md: 9245e62a7fe745f2cbbd84d81d45047b43df8df2
+2026-08-20-tui-opentui-view-layer-implemented.md: 0a0a66c9cfa8f6e660e4e563cfdfbdfe21a654a7
 2026-08-20-tui-opentui-view-layer-implemented.zh.md: 6e484065f9679b5724f40cd8016f52f065b85c6a

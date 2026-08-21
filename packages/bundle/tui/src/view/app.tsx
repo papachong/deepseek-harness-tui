@@ -19,7 +19,6 @@ import { ToolCard } from './components/tool-card.js'
 import { Plan, Todos } from './components/projections.js'
 import { Prompt } from './components/prompt.js'
 
-process.stderr.write('[app] MODULE LOADED\n')
 
 /** Props for {@link App}. */
 export interface AppProps {

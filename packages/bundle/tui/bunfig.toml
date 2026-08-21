@@ -1,0 +1,11 @@
+# dsh-tui Bun runtime preload.
+#
+# Bun resolves bare `solid-js` to `dist/server.js` (the SSR build) by default,
+# where `createRenderEffect` runs once and never subscribes — Solid signal
+# updates never propagate and the view never re-renders after the initial
+# mount. The `@opentui/solid/preload` registers a Bun runtime plugin that
+# intercepts `solid-js/dist/server.js` (+ store) and serves the reactive
+# `dist/solid.js` build instead, matching opencode's `bunfig.toml`. This makes
+# both the tsdown-bundled `runner.js` and the Bun.build-bundled `lib/view/app.js`
+# share ONE reactive solid-js instance at runtime.
+preload = ["@opentui/solid/preload"]
