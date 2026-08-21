@@ -1,6 +1,7 @@
 /**
- * The `<Prompt>` component: the OpenTUI REPL input that owns task submission and
- * pending-question routing. Replaces the readline REPL loop for the render path.
+ * The `<Prompt>` component: the OpenTUI REPL input that owns task submission
+ * and pending-question routing. Replaces the readline REPL loop for the render
+ * path.
  *
  * OpenTUI's `createCliRenderer()` takes stdin into raw mode (DSR query + keymap),
  * so Node's readline cannot coexist. The design-confirm v1 resolution: the
@@ -9,9 +10,13 @@
  * when `pendingQuestion()` is set and routes `onSubmit` to resolve it. When no
  * question is pending, `onSubmit` drives the REPL task.
  *
- * NOTE: uses a memo-conditional instead of `<Show>` for the pending-question
- * banner — the OpenTUI Solid reconciler emits a stray empty text node for
- * `<Show>`'s falsy branch that orphans under a non-text parent.
+ * Visual: a top-bordered box with a colored `❯` prefix (cyan in task mode,
+ * magenta in plan mode) and a dim placeholder. The pending-question banner
+ * renders above the input with a `Q:` prefix.
+ *
+ * NOTE: uses a memo-conditional instead of `<Show>` for the banner — the
+ * OpenTUI Solid reconciler emits a stray empty text node for `<Show>`'s falsy
+ * branch that orphans under a non-text parent.
  *
  * @module @deepseek-ai/dsh-tui/view/components/prompt
  */
@@ -19,6 +24,7 @@
 import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal, type Accessor } from 'solid-js'
 import type { InputRenderable } from '@opentui/core'
+import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
 
 /** Props for {@link Prompt}. */
@@ -31,47 +37,59 @@ export interface PromptProps {
 
 /**
  * Render the prompt. When a pending question exists, the question text is
- * rendered above the input, the placeholder reads `answer> `, and the submitted
- * line resolves the pending answer; otherwise the placeholder reads `task> `
- * and the submitted line fires {@link PromptProps.onSubmit}.
+ * rendered above the input with a `Q:` prefix, the placeholder reads
+ * `answer> `, and the submitted line resolves the pending answer; otherwise
+ * the placeholder reads `task> ` (or `plan> ` in plan mode) and the submitted
+ * line fires {@link PromptProps.onSubmit}. A colored `❯` prefix sits left of
+ * the input; its color tracks the mode (cyan task, magenta plan, yellow answer).
  * @param props - the prompt props.
  * @returns the JSX element for the prompt input.
  */
 export function Prompt(props: PromptProps): JSX.Element {
+  const isAnswer = createMemo(() => props.store.pendingQuestion() !== undefined)
+  const isPlan = createMemo(() => props.store.state.planActive)
+  const prefixColor = createMemo(() =>
+    isAnswer() ? STATUS_COLORS.pending : isPlan() ? '#c678dd' : ROLE_COLORS.user,
+  )
   const placeholder = createMemo(() =>
-    props.store.pendingQuestion() !== undefined ? 'answer> ' : 'task> ',
+    isAnswer() ? 'answer> ' : isPlan() ? 'plan> ' : 'task> ',
   ) as Accessor<string>
 
   const handleSubmit = (value: string): void => {
-    // Answer mode takes priority: if a question is pending, the submitted line
-    // resolves it (approval/ask-user) and never reaches the REPL task path.
     if (props.store.resolveAnswer(value)) return
     props.onSubmit(value)
   }
 
-  // Track the input renderable via ref so onSubmit (which fires with an empty
-  // SubmitEvent) can read the current typed value. The `<input>` value prop is
-  // one-way (it seeds the input); the ref is the source of truth on submit.
   const [inputEl, setInputEl] = createSignal<InputRenderable | undefined>(undefined)
-  const [committedValue] = createSignal('')
 
   const banner = createMemo<JSX.Element>(() => {
     const question = props.store.pendingQuestion()
-    return question === undefined ? undefined : <text fg="yellow">{question}</text>
+    return question === undefined
+      ? undefined
+      : (
+        <box paddingLeft={1}>
+          <text>
+            <text fg={STATUS_COLORS.pending}><b>Q </b></text><text fg={CHROME.text}>{question}</text>
+          </text>
+        </box>
+      )
   })
 
   return (
-    <box>
+    <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingTop={0} paddingBottom={0}>
       {banner()}
-      <input
-        ref={(el: InputRenderable) => { setInputEl(el) }}
-        focused
-        placeholder={placeholder()}
-        onSubmit={() => {
-          const value = inputEl()?.value ?? committedValue()
-          handleSubmit(value)
-        }}
-      />
+      <box paddingLeft={1} flexDirection="row">
+        <text fg={prefixColor()}><b>❯ </b></text>
+        <input
+          ref={(el: InputRenderable) => { setInputEl(el) }}
+          focused
+          placeholder={placeholder()}
+          onSubmit={() => {
+            const value = inputEl()?.value ?? ''
+            handleSubmit(value)
+          }}
+        />
+      </box>
     </box>
   )
 }

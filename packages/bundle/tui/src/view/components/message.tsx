@@ -1,69 +1,109 @@
 /**
- * The `<Message>` component: renders one assistant {@link MessageEntry} as a
- * streaming markdown block, mirroring opencode's TextPart. Uses OpenTUI's
- * `<markdown streaming>` so the renderer folds streaming chunks itself — the
- * store accumulates the text, and this component hands it to the markdown
- * renderable with `streaming={entry.streaming}` so the trailing block stays
- * unstable until `assistant/message` flips the flag off.
+ * The `<Message>` component: renders one {@link MessageEntry} (user or
+ * assistant) as a bordered block with a role-colored left border, prefix glyph,
+ * streaming markdown body, optional reasoning block, and a usage footer.
  *
- * An empty-but-streaming message shows a one-dots spinner placeholder so the
- * user sees activity before the first delta lands.
+ * Mirrors opencode's UserMessage/AssistantMessage/ReasoningPart/TextPart layout
+ * but against the local store (no opencode SDK coupling): the role discriminant
+ * drives border color and prefix; reasoning renders as a dim collapsed block;
+ * usage renders as a muted `↑in ↓out` footer; interrupted renders a red tag;
+ * streaming shows a `▋` cursor instead of a static placeholder.
  *
- * NOTE: this component uses a memo-conditional instead of `<Show>` because the
- * OpenTUI Solid reconciler emits a stray empty text node for `<Show>`'s falsy
- * branch, which orphans under a non-text parent (`<box>`/`<scrollbox>`) and
- * raises "Orphan text error". Returning `undefined` from a memo avoids the
- * stray node.
+ * NOTE: uses memo-conditionals instead of `<Show>` — the OpenTUI Solid
+ * reconciler emits a stray empty text node for `<Show>`'s falsy branch that
+ * orphans under a non-text parent (`<box>`/`<scrollbox>`).
  *
  * @module @deepseek-ai/dsh-tui/view/components/message
  */
 
-import { SyntaxStyle } from '@opentui/core'
 import { type JSX } from '@opentui/solid'
 import { createMemo } from 'solid-js'
+import { ROLE_COLORS, ROLE_PREFIX, CHROME, SYNTAX_THEME, STATUS_COLORS } from '../theme.js'
+import { Spinner } from './spinner.js'
 import type { MessageEntry } from '../store.js'
-
-/**
- * Module-level cached {@link SyntaxStyle}. Created once per process (not per
- * render) — `SyntaxStyle.create()` allocates a native handle, so recreating it
- * on every chunk would leak and stall the FFI.
- */
-const SYNTAX_STYLE = SyntaxStyle.create()
 
 /** Props for {@link Message}. */
 export interface MessageProps {
-  /** The assistant message entry to render. */
+  /** The message entry to render (user or assistant). */
   entry: MessageEntry
 }
 
 /**
- * Render one assistant message as a streaming markdown block. The outer `<box>`
- * pads the message from the transcript edge (left) and from the prior block
- * (top). When the entry has no text yet but is still streaming, a spinner
- * placeholder (`…`) is shown instead of an empty markdown block (an empty
- * `<markdown>` would render nothing and the user would see no activity).
+ * Render one message as a bordered block. The outer `<box>` has a left border
+ * colored by role; the body is streaming markdown (assistant) or plain text
+ * (user). When the entry has reasoning, a dim block renders above the body.
+ * A usage footer and interrupted tag render when present.
  * @param props - the message props.
  * @returns the JSX element for the message.
  */
 export function Message(props: MessageProps): JSX.Element {
+  const role = createMemo(() => props.entry.role)
+  const borderColor = createMemo(() => ROLE_COLORS[role()])
+  const prefix = createMemo(() => ROLE_PREFIX[role()])
   const showMarkdown = createMemo(() => props.entry.text !== '' || !props.entry.streaming)
-  const body = createMemo<JSX.Element>(() =>
-    showMarkdown()
-      ? (
+  const showReasoning = createMemo(() => props.entry.reasoning !== undefined && props.entry.reasoning !== '')
+  const showUsage = createMemo(() => props.entry.usage !== undefined)
+  const showInterrupted = createMemo(() => props.entry.interrupted === true)
+
+  const reasoningBlock = createMemo<JSX.Element>(() => {
+    if (!showReasoning()) return undefined
+    return (
+      <box paddingLeft={1} marginTop={0} marginBottom={0}>
+        <text fg={CHROME.textMuted}><i>💭 thought</i></text>
+        <text fg={CHROME.textMuted}>{props.entry.reasoning}</text>
+      </box>
+    )
+  })
+
+  const body = createMemo<JSX.Element>(() => {
+    if (!showMarkdown()) {
+      return (
+        <box>
+          <Spinner fg={CHROME.textMuted} />
+          <text fg={CHROME.textMuted}> thinking…</text>
+        </box>
+      )
+    }
+    return (
+      <box>
         <markdown
           streaming={props.entry.streaming}
           internalBlockMode="top-level"
           content={props.entry.text}
           tableOptions={{ style: 'grid' }}
-          syntaxStyle={SYNTAX_STYLE}
+          syntaxStyle={SYNTAX_THEME}
           conceal
         />
-      )
-      : <text fg="gray">…</text>,
-  )
+        {props.entry.streaming ? <text fg={borderColor()}>▋</text> : undefined}
+      </box>
+    )
+  })
+
+  const footer = createMemo<JSX.Element>(() => {
+    if (!showUsage() && !showInterrupted()) return undefined
+    const usage = props.entry.usage
+    return (
+      <text fg={CHROME.textMuted}>
+        {showUsage() && usage ? `  ↑${usage.inputTokens} ↓${usage.outputTokens}` : ''}
+        {usage?.cacheReadTokens ? ` ⤒${usage.cacheReadTokens}` : ''}
+        {showInterrupted() ? <text fg={STATUS_COLORS.error}>  [interrupted]</text> : undefined}
+      </text>
+    )
+  })
+
   return (
-    <box paddingLeft={3} marginTop={1}>
+    <box
+      border={['left']}
+      borderStyle="single"
+      borderColor={borderColor()}
+      paddingLeft={1}
+      paddingRight={1}
+      marginTop={1}
+    >
+      <text fg={borderColor()}><b>{prefix()} </b></text>
+      {reasoningBlock()}
       {body()}
+      {footer()}
     </box>
   )
 }

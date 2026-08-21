@@ -13,7 +13,7 @@
 
 import { batch, createSignal } from 'solid-js'
 import { createStore, produce, type SetStoreFunction } from 'solid-js/store'
-import type { CallId } from '@deepseek-ai/dsh-llm'
+import type { CallId, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type {
   SessionEventMap,
   TodoItem,
@@ -33,6 +33,8 @@ export interface ToolEntry {
   turn: number
   /** The step within the turn. */
   step: number
+  /** Monotonic session seq of the originating `tool/call` event; orders the merged transcript. */
+  seq: number
   /** Raw arguments JSON string exactly as the model produced it (unparsed). */
   arguments: string
   /** Call-time render intent, when the host computed one via `presentCall`. Absent for v1 (the store has no tool registry). */
@@ -48,23 +50,29 @@ export interface ToolEntry {
 }
 
 /**
- * One assistant message in the transcript, accumulated from streaming chunks.
+ * One message in the transcript, accumulated from streaming chunks (assistant)
+ * or projected from a `user/message` event (user). The `role` discriminant
+ * drives the left-border color and prefix glyph in `<Message>`.
  */
 export interface MessageEntry {
-  /** `${turn}:${step}` — the stable identity for one assistant step. */
+  /** `${turn}:${step}` for assistant steps; `user:${seq}` for user messages — stable identity. */
   id: string
-  /** The turn the message belongs to. */
+  /** `user` for human prompts; `assistant` for model output. Drives rendering. */
+  role: 'user' | 'assistant'
+  /** The turn the message belongs to (0 for pre-turn user messages, if any). */
   turn: number
-  /** The step within the turn. */
+  /** The step within the turn (0 for user messages, which are not step-scoped). */
   step: number
-  /** Accumulated `text-delta` text (streaming append). */
+  /** Monotonic session seq of the originating event; orders the merged transcript. */
+  seq: number
+  /** Accumulated `text-delta` text (assistant) or joined text blocks (user). */
   text: string
   /** Accumulated `reasoning-delta` text, when the adapter emitted reasoning. */
   reasoning?: string
   /** True while the step is still streaming; false after `assistant/message`. */
   streaming: boolean
   /** Token accounting, set when `assistant/message` carries `usage`. */
-  usage?: { inputTokens: number; outputTokens: number }
+  usage?: TokenUsage
   /** True when the step was cancelled mid-stream (set by `assistant/message`). */
   interrupted?: boolean
 }
@@ -269,13 +277,38 @@ function applyEvent(
     return
   }
   switch (event.type) {
+    case 'user/message': {
+      const message = event.data
+      const seq = event.seq
+      // One user/message event may carry a batch of messages, but each event
+      // is one Message; the loop fires one event per claimed message. Project
+      // the text blocks into one transcript entry.
+      const text = message.content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map(b => b.text)
+        .join('')
+      // Skip entries with no visible text (e.g. pure tool-result user turns);
+      // their tool result renders as a ToolCard via tool/result.
+      if (text === '') break
+      setState('messages', state.messages.length, {
+        id: `user:${seq}`,
+        role: 'user',
+        turn: 0,
+        step: 0,
+        seq,
+        text,
+        streaming: false,
+      })
+      break
+    }
     case 'assistant/chunk': {
       const { turn, step, chunk } = event.data
+      const seq = event.seq
       const id = `${turn}:${step}`
       const idx = state.messages.findIndex(m => m.id === id)
       if (idx === -1) {
         const entry: MessageEntry = {
-          id, turn, step, text: '', streaming: true,
+          id, role: 'assistant', turn, step, seq, text: '', streaming: true,
         }
         setState('messages', state.messages.length, entry)
         applyChunk(setState, state.messages.length - 1, chunk)
@@ -287,9 +320,10 @@ function applyEvent(
     }
     case 'tool/call': {
       const { turn, step, callId, name, arguments: raw } = event.data
+      const seq = event.seq
       const idx = state.tools.findIndex(t => t.callId === callId)
       const entry: ToolEntry = {
-        callId, name, turn, step, arguments: raw, state: 'pending',
+        callId, name, turn, step, seq, arguments: raw, state: 'pending',
       }
       if (idx === -1) {
         setState('tools', state.tools.length, entry)
@@ -301,16 +335,26 @@ function applyEvent(
     case 'tool/result': {
       const { turn, step, message } = event.data
       const [block] = message.content
+      const callId = block.toolCallId
       const resultText = block.content
-        .filter(b => b.type === 'text')
-        .map(b => (b.type === 'text' ? b.text : ''))
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map(b => b.text)
         .join('')
       const isError = block.isError === true
-      const idx = state.tools.findIndex(t => t.turn === turn && t.step === step)
+      // Correlate by callId (stable per call), not turn+step (ambiguous when
+      // one step makes several tool calls).
+      const idx = state.tools.findIndex(t => t.callId === callId)
       if (idx !== -1) {
         setState('tools', idx, 'state', 'completed')
         setState('tools', idx, 'resultText', resultText)
         setState('tools', idx, 'isError', isError)
+      } else {
+        // Result without a preceding tool/call (e.g. replay starting mid-step):
+        // synthesize a completed entry so the card still renders.
+        setState('tools', state.tools.length, {
+          callId, name: '', turn, step, seq: event.seq,
+          arguments: '', state: 'completed', resultText, isError,
+        })
       }
       break
     }
@@ -321,7 +365,9 @@ function applyEvent(
       if (idx !== -1) {
         setState('messages', idx, 'streaming', false)
         if (usage !== undefined) {
-          setState('messages', idx, 'usage', { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
+          // Preserve the full TokenUsage (cacheRead/Write + reasoning), not
+          // just input/output — the status bar shows cache hit ratio.
+          setState('messages', idx, 'usage', usage)
         }
         if (interrupted === true) {
           setState('messages', idx, 'interrupted', true)
