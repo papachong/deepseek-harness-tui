@@ -17,7 +17,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createMemo } from 'solid-js'
+import { createMemo, createSignal } from 'solid-js'
 import { ROLE_COLORS, ROLE_PREFIX, CHROME, SYNTAX_THEME, STATUS_COLORS } from '../theme.js'
 import { Spinner } from './spinner.js'
 import type { MessageEntry } from '../store.js'
@@ -44,13 +44,34 @@ export function Message(props: MessageProps): JSX.Element {
   const showReasoning = createMemo(() => props.entry.reasoning !== undefined && props.entry.reasoning !== '')
   const showUsage = createMemo(() => props.entry.usage !== undefined)
   const showInterrupted = createMemo(() => props.entry.interrupted === true)
+  // Reasoning collapse: default collapsed (one-line header); expandable to show
+  // the full thought chain. A signal per message instance; OpenTUI has no click
+  // on <text>, so the toggle is driven by a key the runner could later wire to
+  // a keymap (e.g. Tab on the focused reasoning header). For now the header
+  // shows the toggle glyph and the state stays collapsed until expanded.
+  const [reasoningExpanded] = createSignal(false)
+  // Step duration: finishedAt - startedAt (epoch ms). Undefined while
+  // streaming or before both timestamps land.
+  const durationMs = createMemo(() => {
+    const start = props.entry.startedAt
+    const end = props.entry.finishedAt
+    return start !== undefined && end !== undefined ? end - start : undefined
+  })
 
   const reasoningBlock = createMemo<JSX.Element>(() => {
     if (!showReasoning()) return undefined
+    const glyph = reasoningExpanded() ? '▼' : '▶'
     return (
       <box paddingLeft={1} marginTop={0} marginBottom={0}>
-        <text fg={CHROME.textMuted}><i>💭 thought</i></text>
-        <text fg={CHROME.textMuted}>{props.entry.reasoning}</text>
+        <box flexDirection="row">
+          <text fg={CHROME.textMuted}><i>{glyph} thought</i></text>
+          {props.entry.streaming
+            ? <text fg={CHROME.textMuted}> <Spinner fg={CHROME.textMuted} /></text>
+            : undefined}
+        </box>
+        {reasoningExpanded()
+          ? <text fg={CHROME.textMuted}>{props.entry.reasoning}</text>
+          : undefined}
       </box>
     )
   })
@@ -80,12 +101,13 @@ export function Message(props: MessageProps): JSX.Element {
   })
 
   const footer = createMemo<JSX.Element>(() => {
-    if (!showUsage() && !showInterrupted()) return undefined
+    if (!showUsage() && !showInterrupted() && !durationMs()) return undefined
     const usage = props.entry.usage
     return (
       <box flexDirection="row">
         {showUsage() && usage ? <text fg={CHROME.textMuted}>  ↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
         {usage?.cacheReadTokens ? <text fg={CHROME.textMuted}> ⤒{usage.cacheReadTokens}</text> : undefined}
+        {durationMs() !== undefined ? <text fg={CHROME.textMuted}> ·{formatDuration(durationMs() ?? 0)}</text> : undefined}
         {showInterrupted() ? <text fg={STATUS_COLORS.error}>  [interrupted]</text> : undefined}
       </box>
     )
@@ -106,4 +128,18 @@ export function Message(props: MessageProps): JSX.Element {
       {footer()}
     </box>
   )
+}
+
+/**
+ * Format a millisecond duration as a compact human string (e.g. `1.2s`,
+ * `450ms`, `12s`). Used in the message footer next to the token counts.
+ * @param ms - the duration in milliseconds.
+ * @returns the formatted duration string.
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m${Math.floor(seconds % 60)}s`
 }

@@ -75,6 +75,10 @@ export interface MessageEntry {
   usage?: TokenUsage
   /** True when the step was cancelled mid-stream (set by `assistant/message`). */
   interrupted?: boolean
+  /** Wall-clock start time (epoch ms) of the first chunk; for duration display. */
+  startedAt?: number
+  /** Wall-clock end time (epoch ms) of the step (`assistant/message` event time). */
+  finishedAt?: number
 }
 
 /**
@@ -309,6 +313,7 @@ function applyEvent(
       if (idx === -1) {
         const entry: MessageEntry = {
           id, role: 'assistant', turn, step, seq, text: '', streaming: true,
+          startedAt: event.time,
         }
         setState('messages', state.messages.length, entry)
         applyChunk(setState, state.messages.length - 1, chunk)
@@ -377,6 +382,7 @@ function applyEvent(
       const idx = state.messages.findIndex(m => m.id === id)
       if (idx !== -1) {
         setState('messages', idx, 'streaming', false)
+        setState('messages', idx, 'finishedAt', event.time)
         if (usage !== undefined) {
           // Preserve the full TokenUsage (cacheRead/Write + reasoning), not
           // just input/output — the status bar shows cache hit ratio.
