@@ -23,7 +23,7 @@
 
 import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal, type Accessor } from 'solid-js'
-import type { InputRenderable, KeyEvent } from '@opentui/core'
+import type { TextareaRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
 
@@ -61,7 +61,10 @@ export function Prompt(props: PromptProps): JSX.Element {
     props.onSubmit(value)
   }
 
-  const [inputEl, setInputEl] = createSignal<InputRenderable | undefined>(undefined)
+  const [inputEl, setInputEl] = createSignal<TextareaRenderable | undefined>(undefined)
+  // Track the live content via onContentChange so submit can read the current
+  // value without reaching into the textarea's internal edit buffer.
+  const [liveValue, setLiveValue] = createSignal('')
   // Session-scoped input history: ↑/↓ navigates previously submitted lines.
   // Stored in a signal array local to this Prompt instance (one per process,
   // matching the single-session TUI). `cursor` is the index into history while
@@ -78,21 +81,24 @@ export function Prompt(props: PromptProps): JSX.Element {
     if (direction === 'up') {
       if (historyCursor === null) {
         historyCursor = items.length - 1
-        draftBeforeNav = el.value
+        draftBeforeNav = liveValue()
       } else if (historyCursor > 0) {
         historyCursor -= 1
       } else {
         return
       }
-      el.value = items[historyCursor] ?? ''
+      el.editBuffer.setText(items[historyCursor] ?? '')
+      setLiveValue(items[historyCursor] ?? '')
     } else {
       if (historyCursor === null) return
       if (historyCursor >= items.length - 1) {
         historyCursor = null
-        el.value = draftBeforeNav
+        el.editBuffer.setText(draftBeforeNav)
+        setLiveValue(draftBeforeNav)
       } else {
         historyCursor += 1
-        el.value = items[historyCursor] ?? ''
+        el.editBuffer.setText(items[historyCursor] ?? '')
+        setLiveValue(items[historyCursor] ?? '')
       }
     }
   }
@@ -122,10 +128,13 @@ export function Prompt(props: PromptProps): JSX.Element {
       {banner()}
       <box paddingLeft={1} flexDirection="row">
         <text fg={prefixColor()}><b>❯ </b></text>
-        <input
-          ref={(el: InputRenderable) => { setInputEl(el) }}
+        <textarea
+          ref={(el: TextareaRenderable) => { setInputEl(el) }}
           focused
+          minHeight={1}
+          maxHeight={6}
           placeholder={placeholder()}
+          onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
           onKeyDown={(key: KeyEvent) => {
             if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
               navigateHistory('up')
@@ -136,7 +145,7 @@ export function Prompt(props: PromptProps): JSX.Element {
             }
           }}
           onSubmit={() => {
-            const value = inputEl()?.value ?? ''
+            const value = liveValue()
             handleSubmit(value)
           }}
         />
