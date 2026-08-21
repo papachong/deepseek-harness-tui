@@ -46,10 +46,11 @@ OpenTUI 渲染层按已实现交付：`@opentui/solid` 替换 raw-stdout Phase 2
 ## Risks
 
 1. **`<Show>` 孤儿**——OpenTUI Solid reconciler 对 `<Show>` 假值分支发出游离空文本节点；在非文本父节点（`<scrollbox>`）下抛 `Orphan text error`。缓解：所有条件用 `createMemo` 返回 `JSX.Element | undefined` 代替 `<Show>`。每个组件模块文档均有记录。
-2. **管道 stdin 无法驱动 `<Prompt>`**——OpenTUI 的 `<input>` 消费 raw-mode keypress 事件；管道不产生，故 `echo | bun lib/bin.js` 的无 key 快照 replay 能启动渲染器但无法驱动一轮。Live 验证需真实 TTY + `DEEPSEEK_API_KEY`。这是 raw-mode TUI 的固有属性（opencode 同样如此）；40 归档快照验收推迟到 pty 驱动的快照 harness 存在。
-3. **构建接线是手动的**——根 `scripts/build.ts` 不调用 per-package 脚本，故 `build:view` 尚未接入 `pnpm run build`。当前契约是 spine 构建后跑 `bun scripts/build-view.ts`；作为 `runScript('build:view', …)` 后续接入是推迟的清理。
-4. **工具卡片特化推迟**——card-union switch（terminal/diff/read/search/web）v1 全落 generic；store 不填 `callView`/`resultView`（无工具注册表）。后续让 runner 调 `presentCall`/`presentResult` 并把 view 传给 store。
-5. **`lib/view/*.js` 被 gitignore**——与 `lib/` 其余部分一样，view bundle 是 `bun scripts/build-view.ts` 再生的构建产物；`files[]` 白名单在发布时携带。
+2. **Solid 响应式不驱动挂载后的重渲染（阻塞）**——`createStore`/`createSignal` 更新触发（探针确认 store flush 且 signal setter 运行），但 `<For each>` 不再求值：Solid effect 队列在 Bun 下不 flush 到 @opentui/solid 的 reconciler。初始挂载渲染（静态 `task>` 提示、输入回显），`renderer.start()` + exit latch 保持 bin 存活，但流式 assistant 文本和工具卡片从不出现。最小复现（`createSignal` + `<For>` + `r.start()`）同样失败，故不是 double-`solid-js`-instance 或 store-outside-root 问题。opencode 工作；差异未解——可能是 `createCliRenderer` 配置（`targetFps`/`useKittyKeyboard`/`autoFocus`）或我们未复现的 `@opentui/solid/preload` 运行时钩子。这是 live 模型输出的开放阻塞。
+3. **管道 stdin 无法驱动 `<Prompt>`**——OpenTUI 的 `<input>` 消费 raw-mode keypress 事件；管道不产生。python `pty.fork` harness（`tests/pty-harness.ts`）驱动 bin：`onSubmit` 触发，agent loop 运行（`turn/start` → `assistant/chunk` 事件探针确认），但视图不更新（见风险 #2）。Live 验证需真实 TTY + `DEEPSEEK_API_KEY`。
+4. **构建接线**——根 `scripts/build.ts` 现在在 `build:lib` 和 `build:web` 之间调用 `runViewBuild()`（PATH 遍历找 `bun`）；Bun 不在时 warn 跳过。release lane 加 `oven-sh/setup-bun@v2`。
+5. **工具卡片特化推迟**——card-union switch（terminal/diff/read/search/web）v1 全落 generic；store 不填 `callView`/`resultView`（无工具注册表）。
+6. **`lib/view/*.js` 被 gitignore**——与 `lib/` 其余部分一样，view bundle 是 `bun scripts/build-view.ts` 再生的构建产物；`files[]` 白名单在发布时携带。
 
 ## 备选方案
 

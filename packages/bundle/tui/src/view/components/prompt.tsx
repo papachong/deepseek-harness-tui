@@ -65,6 +65,7 @@ export function Prompt(props: PromptProps): JSX.Element {
       {banner()}
       <input
         ref={(el: InputRenderable) => { setInputEl(el) }}
+        focused
         placeholder={placeholder()}
         onSubmit={() => {
           const value = inputEl()?.value ?? committedValue()

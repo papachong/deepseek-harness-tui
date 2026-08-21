@@ -1363,6 +1363,9 @@ importers:
       '@types/mdast':
         specifier: ^4.0.4
         version: 4.0.4
+      execa:
+        specifier: ^10.0.0
+        version: 10.0.0
     optionalDependencies:
       '@opentui/core-darwin-arm64':
         specifier: ^0.5.4

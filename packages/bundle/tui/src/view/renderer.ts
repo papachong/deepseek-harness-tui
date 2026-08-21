@@ -123,13 +123,17 @@ export async function createTuiRenderer(): Promise<CliRenderer> {
 }
 
 /**
- * Mount a Solid root into the renderer. Delegates to `@opentui/solid`'s
- * `render`, which reconciles the returned element tree against the renderer's
- * frame loop. The caller passes a root factory that closes over the store.
+ * Mount a Solid root into the renderer and start the render loop. Delegates to
+ * `@opentui/solid`'s `render` (which reconciles the element tree), then calls
+ * `renderer.start()` so the frame loop + stdin-driven key dispatch run. Without
+ * `start()`, `render()` mounts the tree but the input loop never runs — the
+ * `<input>`'s `onSubmit` never fires (the renderer reads stdin only while the
+ * loop is active). The caller passes a root factory that closes over the store.
  * @param root - a factory returning the top-level JSX element.
  * @param renderer - the renderer returned by {@link createTuiRenderer}.
- * @returns a promise that resolves when the initial render is committed.
+ * @returns a promise that resolves when the initial render is committed and the loop is started.
  */
 export async function renderApp(root: () => JSX.Element, renderer: CliRenderer): Promise<void> {
   await render(root, renderer)
+  renderer.start()
 }

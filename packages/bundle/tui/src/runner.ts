@@ -18,7 +18,6 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
-import { createLineInput } from './input.ts'
 import { createTuiStore, type TuiStore } from './view/store.js'
 import { createTuiRenderer, renderApp } from './view/renderer.js'
 import type { JSX } from '@opentui/solid'
@@ -91,12 +90,16 @@ export async function runTui(): Promise<void> {
   // Standalone exit: no dsh launcher => no ctx.appExit (unlike headless
   // index.ts:144-146 which reads ctx.get('appExit')). Own it like Phase 0.
   let exiting = false
+  /** Resolved by {@link disposeAndExit} to unblock the render-loop await. */
+  let exitLatch: (() => void) | undefined
   async function disposeAndExit(code: number): Promise<void> {
     if (exiting) return
     exiting = true
     // Restore the terminal: OpenTUI's renderer entered alt screen and hid the
     // cursor; write the leave-alt-screen + show-cursor escape sequences.
     process.stdout.write('\x1b[?1049l\x1b[?25h')
+    // Unblock the render-loop await so the runner can tear down.
+    exitLatch?.()
     try {
       await ctx.fiber.dispose()
     } finally {
@@ -120,22 +123,15 @@ export async function runTui(): Promise<void> {
   // until drained. Never close inside a line handler (Phase 0 bug b).
   // Line-mode for Phase 1; raw-mode keypress is Phase 2.
   // NOTE: under the OpenTUI render path, the <Prompt> component owns task
-  // input via onSubmit. The line dispatcher stays registered only for the
-  // approval/ask-user answerers, which push a pending question into the store
-  // and call awaitAnswer() instead of readLine() (OpenTUI raw mode breaks
-  // readline's line events). The dispatcher is kept for non-render fallback
-  // and its close() is still invoked on exit.
-  const input = createLineInput({
-    input: process.stdin,
-    // output is REQUIRED for echo: with output omitted, Node's readline
-    // leaves this.output undefined and _writeToOutput silently drops every
-    // echo/refresh write (internal/readline/interface.js kWriteToOutput).
-    // terminal:true then sets raw mode (-echo) at the driver level, so the
-    // user's keystrokes are consumed but never displayed. process.stdout is
-    // the terminal surface (mirror runner.ts:166 usage).
-    output: process.stdout,
-    terminal: !process.stdin.isTTY ? false : true,
-  })
+  // input via onSubmit. The line dispatcher is NOT created here: readline's
+  // `createInterface` with `terminal:true` calls `setRawMode` on stdin, which
+  // races OpenTUI's `createCliRenderer()` raw-mode keymap (OpenTUI loses the
+  // race and the keystrokes never reach the `<input>` — `onSubmit` never fires,
+  // 0 events). The answerers use the store's `awaitAnswer`/`resolveAnswer`
+  // surface, not `readLine()`, so the dispatcher is unneeded under the render
+  // path. It stays available for a non-render fallback if one is added later.
+  // `output: process.stdout` echo handling moves into the OpenTUI `<input>`
+  // (its keymap echoes typed characters in raw mode).
 
   // Read core services through ctx.get, not the property proxy
   // (headless/src/index.ts:100-104).
@@ -236,8 +232,14 @@ export async function runTui(): Promise<void> {
       })
     }
     await renderApp(createAppRoot(store, onSubmit), renderer)
-    // The render call blocks the fiber while the TUI runs; disposeAndExit is
-    // invoked from onSubmit (exit/quit) or SIGINT/SIGTERM.
+    // renderApp() resolves after mounting + renderer.start(); it does NOT
+    // block. The renderer's frame loop + stdin key dispatch run on Bun's
+    // event loop, but the runner's control flow would fall through to the
+    // finally block (disposeAndExit) immediately, killing the TUI before the
+    // user can type. Block here until disposeAndExitWithRenderer is invoked
+    // (from onSubmit exit/quit or SIGINT/SIGTERM) via a promise that the
+    // exit path resolves.
+    await new Promise<void>((resolve) => { exitLatch = resolve })
   } catch (error: unknown) {
     exitCode = 1
     process.stderr.write(`${NAME}: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -255,7 +257,6 @@ export async function runTui(): Promise<void> {
     disposeStatus()
     disposeApproval()
     disposeQuestions()
-    input.close()
     await disposeAndExit(exitCode)
   }
 }

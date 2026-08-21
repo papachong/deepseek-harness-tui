@@ -19,6 +19,8 @@ import { ToolCard } from './components/tool-card.js'
 import { Plan, Todos } from './components/projections.js'
 import { Prompt } from './components/prompt.js'
 
+process.stderr.write('[app] MODULE LOADED\n')
+
 /** Props for {@link App}. */
 export interface AppProps {
   /** The reactive store the components read. */
@@ -39,18 +41,18 @@ export interface AppProps {
  * @returns the JSX element for the app root.
  */
 export function App(props: AppProps): JSX.Element {
-  const todosBlock = createMemo(() => <Todos todos={props.store.todos} />)
+  const todosBlock = createMemo(() => <Todos todos={props.store.state.todos} />)
   return (
     <box>
       <scrollbox stickyScroll stickyStart="bottom">
-        <For each={props.store.messages}>
+        <For each={props.store.state.messages}>
           {message => <Message entry={message} />}
         </For>
-        <For each={props.store.tools}>
+        <For each={props.store.state.tools}>
           {tool => <ToolCard tool={tool} />}
         </For>
         {todosBlock()}
-        <Plan active={props.store.planActive} />
+        <Plan active={props.store.state.planActive} />
       </scrollbox>
       <Prompt store={props.store} onSubmit={props.onSubmit} />
     </box>

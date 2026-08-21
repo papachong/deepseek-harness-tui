@@ -85,6 +85,15 @@ export interface TuiStore {
   /** Latest agent status string (e.g. `idle`, `running`). */
   readonly status: string
   /**
+   * The underlying Solid `createStore` proxy. Components that need
+   * fine-grained reactivity (e.g. `<For each={store.state.messages}>`) read
+   * the proxy directly so Solid tracks the deep property access. The
+   * getter-based accessors above return the same proxy, but Solid does not
+   * re-invoke a plain getter when the underlying store mutates, so `<For>`
+   * must read `store.state.messages` (the proxy) in a tracking scope.
+   */
+  readonly state: StoreState
+  /**
    * Queue a transport event for batched application. Events are applied within
    * a 16ms coalescing window so a burst of chunks produces one render.
    * @param event - the normalized transport event to apply.
@@ -126,7 +135,7 @@ export interface TuiStore {
 /**
  * The mutable store state held under one Solid `createStore` proxy.
  */
-interface StoreState {
+export interface StoreState {
   messages: MessageEntry[]
   tools: ToolEntry[]
   todos: TodoItem[]
@@ -218,6 +227,16 @@ export function createTuiStore(): TuiStore {
     get todos(): readonly TodoItem[] { return state.todos },
     get planActive(): boolean { return state.planActive },
     get status(): string { return state.status },
+    /**
+     * The Solid store proxy. Components that need fine-grained reactivity
+     * (e.g. `<For each={store.state.messages}>`) read the proxy directly so
+     * Solid tracks the deep property access. The getter-based accessors above
+     * return the same proxy but Solid does not re-invoke a plain getter when
+     * the underlying store mutates, so the `<For>` never re-ran after the
+     * initial empty read. Exposing `state` lets components read the proxy in
+     * a tracking scope.
+     */
+    state,
     push,
     setStatus,
     awaitAnswer,
