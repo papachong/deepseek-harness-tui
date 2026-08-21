@@ -52,11 +52,11 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   )
 
   const header = createMemo<JSX.Element>(() => (
-    <text>
+    <box flexDirection="row">
       {isPending() ? <Spinner fg={STATUS_COLORS.pending} /> : <text fg={glyphColor()}><b>{STATUS_GLYPH[isError() ? 'error' : 'completed']}</b></text>}
       <text fg={CHROME.text}><b> {props.tool.name}</b></text>
       {props.tool.arguments ? <text fg={CHROME.textMuted}> {previewArgs(props.tool.arguments)}</text> : undefined}
-    </text>
+    </box>
   ))
 
   const body = createMemo<JSX.Element>(() => {

@@ -67,10 +67,9 @@ export function Prompt(props: PromptProps): JSX.Element {
     return question === undefined
       ? undefined
       : (
-        <box paddingLeft={1}>
-          <text>
-            <text fg={STATUS_COLORS.pending}><b>Q </b></text><text fg={CHROME.text}>{question}</text>
-          </text>
+        <box paddingLeft={1} flexDirection="row">
+          <text fg={STATUS_COLORS.pending}><b>Q </b></text>
+          <text fg={CHROME.text}>{question}</text>
         </box>
       )
   })

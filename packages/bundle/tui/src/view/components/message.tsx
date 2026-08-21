@@ -83,11 +83,11 @@ export function Message(props: MessageProps): JSX.Element {
     if (!showUsage() && !showInterrupted()) return undefined
     const usage = props.entry.usage
     return (
-      <text fg={CHROME.textMuted}>
-        {showUsage() && usage ? `  ↑${usage.inputTokens} ↓${usage.outputTokens}` : ''}
-        {usage?.cacheReadTokens ? ` ⤒${usage.cacheReadTokens}` : ''}
+      <box flexDirection="row">
+        {showUsage() && usage ? <text fg={CHROME.textMuted}>  ↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
+        {usage?.cacheReadTokens ? <text fg={CHROME.textMuted}> ⤒{usage.cacheReadTokens}</text> : undefined}
         {showInterrupted() ? <text fg={STATUS_COLORS.error}>  [interrupted]</text> : undefined}
-      </text>
+      </box>
     )
   })
 

@@ -56,12 +56,12 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
       paddingRight={1}
       flexDirection="row"
     >
-      <text>
+      <box flexDirection="row">
         <text fg={dotColor()}>● </text>
         <text fg={CHROME.text}><b>dsh</b></text>
         <text fg={CHROME.textMuted}> · deepseek</text>
-      </text>
-      <text fg={CHROME.textMuted}>  {status()}</text>
+        <text fg={CHROME.textMuted}>  {status()}</text>
+      </box>
       <box flexGrow={1} />
       <text fg={CHROME.textMuted}>↑{totals().inputTokens} ↓{totals().outputTokens}</text>
     </box>
