@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-18-tui-solution-and-dev-plan.md
 2026-08-18-tui-solution-and-dev-plan.md: bc72d6cbd42f02acd8386e27925c1a6a57284873
-2026-08-18-tui-solution-and-dev-plan.zh.md: f344d10338744350aa3c931c9fbafa4de2fb0bf3
+2026-08-18-tui-solution-and-dev-plan.zh.md: 9b5766a4f0b4f672dc3d0046a854d97e14ef9984

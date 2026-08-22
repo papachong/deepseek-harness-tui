@@ -6,7 +6,7 @@ Status: proposed
 
 ## 问题
 
-[TUI 分析 note](2026-08-18-tui-terminal-product-analysis.md) 已确立 *做什么* 与 *为什么*：deepseek-harness 当前无 TUI，架构已留好接入点，Phase 0 已验证 in-process `session/event` → 终端管道，远程 transport 已定 BFF SSE。缺的是可执行的 *方案与计划*：要调哪些精确 seam、加哪些文件、阶段顺序、每步验证门。本 note 补上这一缺口。它是 TUI 工作项的 `sf-solution` + `sf-plan` 输出，不取代分析 note 的任何结论——它依赖该 note 的判断（以删除产物为规格重建、不碰 core、BFF SSE、纯加法新包）。
+[TUI 分析 note](2026-08-18-tui-terminal-product-analysis.zh.md) 已确立 *做什么* 与 *为什么*：deepseek-harness 当前无 TUI，架构已留好接入点，Phase 0 已验证 in-process `session/event` → 终端管道，远程 transport 已定 BFF SSE。缺的是可执行的 *方案与计划*：要调哪些精确 seam、加哪些文件、阶段顺序、每步验证门。本 note 补上这一缺口。它是 TUI 工作项的 `sf-solution` + `sf-plan` 输出，不取代分析 note 的任何结论——它依赖该 note 的判断（以删除产物为规格重建、不碰 core、BFF SSE、纯加法新包）。
 
 ### Resolved（本地模板阶段）
 
@@ -126,7 +126,7 @@ packages/bundle/tui/
 
 ## 备选方案
 
-所有主要备选已在 [分析 note](2026-08-18-tui-terminal-product-analysis.md) 决定，**不**在此重议；本计划继承：
+所有主要备选已在 [分析 note](2026-08-18-tui-terminal-product-analysis.zh.md) 决定，**不**在此重议；本计划继承：
 
 - **远程 transport：** BFF SSE 已选，SDK JSON-RPC 延后（分析 §10——SDK 审批系 "dead capability"）。不再重开。
 - **前任 TUI 恢复：** 以规格重建，不机械恢复（分析 §11.5——`installAgentLlmTarget` 已从 core 删）。不再重开。

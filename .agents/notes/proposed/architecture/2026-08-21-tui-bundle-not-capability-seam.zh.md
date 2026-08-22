@@ -2,7 +2,7 @@
 
 Status: proposed
 
-English | [中文](2026-08-21-tui-bundle-not-capability-seam.zh.md)
+[English](2026-08-21-tui-bundle-not-capability-seam.md) | 中文
 
 ## 问题
 
@@ -44,7 +44,12 @@ Bun-FFI 运行时不匹配决定此形态。`dsh --profile <name>` 经 `dsh` CLI
 
 ## 何时重审
 
-仅当**同时**满足时引入 `ctx.surface`/`ctx.render`：(1) 出现第二个真实前端；(2) 渲染协议需进程内统一。Provider 契约聚合 runner.ts + answerers.ts 已做的三件事。
+仅当**同时**满足时引入 `ctx.surface`/`ctx.render`：
+
+1. 出现第二个真实前端（IDE 扩展、第二种 TUI 框架，或 warp 模式）；
+2. 渲染协议需要进程内统一，而非各前端分别订阅 `session/event`。
+
+Provider 契约聚合 runner.ts + answerers.ts 已做的三件事。
 
 ## 范围外
 
