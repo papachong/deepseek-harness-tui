@@ -27,6 +27,7 @@
     { "path": "../../interaction/commands" },
     { "path": "../../interaction/user-approval" },
     { "path": "../../interaction/user-questions" },
+    { "path": "../../preset/agent-presets" },
     { "path": "../../compaction/compaction-basic" },
     { "path": "../../compaction/compaction-tool-result-pruner" },
     { "path": "../../compaction/command-compact" },

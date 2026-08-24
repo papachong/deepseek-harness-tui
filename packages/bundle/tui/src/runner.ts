@@ -8,6 +8,8 @@
  */
 
 import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve as resolvePath } from 'node:path'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type ModelSelectionRef, type ModelSelection } from '@deepseek-ai/dsh-agent'
@@ -16,11 +18,12 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 // Type-only imports that bring Context augmentations (ctx.llm,
-// ctx.sessionPersistence) into this program's type graph, mirroring
-// api-proxy.ts:31's pattern for ctx.tools.
+// ctx.sessionPersistence, ctx.commands, ctx.agentPresets) into this program's
+// type graph, mirroring api-proxy.ts:31's pattern for ctx.tools.
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
@@ -152,8 +155,30 @@ export async function runTui(): Promise<void> {
     process.stdin.pause()
   }
 
+  // The shipped agent-preset root sits beside the CLI app config. The
+  // `!!js` eval scope in cordis.yml has no `import.meta`, so the runner
+  // resolves the path from its own module URL and injects it as an overlay
+  // `roots` patch on the agent-presets row before boot — mirroring
+  // apps/cli/src/profile-boot.ts's SHIPPED_PRESET_ROOT injection. A patch
+  // replaces the row's whole `config` (loader semantics), so the overlay
+  // carries `default` + `includeUserRoot` alongside `roots`.
+  const shippedPresetRoot = resolvePath(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../../../apps/cli/config/agent-presets',
+  )
+  const presetOverlay = existsSync(shippedPresetRoot)
+    ? [{
+      id: 'agent-presets',
+      config: {
+        default: 'standard',
+        includeUserRoot: false,
+        roots: [{ path: shippedPresetRoot, trust: 'system' as const }],
+      },
+    }]
+    : []
+
   // boot() settles the whole Loader tree (app-boot/src/index.ts:757-802).
-  const ctx = await boot(NAME, configPath, undefined, undefined, undefined)
+  const ctx = await boot(NAME, configPath, presetOverlay, undefined, undefined)
 
   // Standalone exit: no dsh launcher => no ctx.appExit (unlike headless
   // index.ts:144-146 which reads ctx.get('appExit')). Own it like Phase 0.
@@ -209,6 +234,7 @@ export async function runTui(): Promise<void> {
   const llm = ctx.get('llm')
   const sessionPersistence = ctx.get('sessionPersistence')
   const commands = ctx.get('commands')
+  const agentPresets = ctx.get('agentPresets')
   if (agents === undefined || defaultModel === undefined || sessions === undefined) {
     throw new Error(`${NAME}: config must mount agent-spine + agent-default-model + sessions`)
   }
@@ -228,13 +254,34 @@ export async function runTui(): Promise<void> {
   // The agent is held in a `let` (not `const`) because session switching
   // disposes + re-creates it; the event/status listeners rebind to the new
   // agent via `rebind`.
-  const setup = (agentCtx: Context) => {
+  //
+  // Work mode: the active preset id (`store.mode()`, Tab-cyclable) joins the
+  // agent in `setup` via `ctx.agentPresets.mount(agentCtx, id)` — the
+  // api-proxy pattern (api-proxy.ts:1186). The preset id flows onto the
+  // session header so resume rebuilds the same composition. `agentPresets` is
+  // optional: a composition without the roster mounts a bare agent. The mount
+  // is best-effort: under replay (`cordis.snapshot.yml`) the preset row is
+  // nested inside an `include`d tree the overlay patches cannot reach, so
+  // `resolve` finds no roots; a bare agent still replays a recorded session
+  // fine, so a failure logs a warning rather than aborting boot.
+  const setup = async (agentCtx: Context): Promise<void> => {
     installModelSelection(agentCtx, selectionRef)
+    if (agentPresets !== undefined) {
+      try {
+        await agentPresets.mount(agentCtx, store.mode())
+      } catch (error: unknown) {
+        agentCtx.logger.warn(
+          `dsh-tui: work mode "${store.mode()}" preset did not mount `
+          + `(${error instanceof Error ? error.message : String(error)}); agent runs bare. `
+          + 'Live mode: check the preset root overlay. Replay mode: the snapshot include tree hides the row.',
+        )
+      }
+    }
   }
   let agentHandle = resumeSessionId === undefined
     ? await agents.create({
       sessionId: SessionId(`tui-${process.pid}`),
-      meta: { cwd: process.cwd() },
+      meta: { cwd: process.cwd(), agentPreset: store.mode() },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup,
     })
@@ -354,7 +401,7 @@ export async function runTui(): Promise<void> {
         onSelectSession?: (id: string) => void,
       ) => () => JSX.Element
     }
-    const onSubmit = (text: string): void => {
+    const onSubmit = async (text: string): Promise<void> => {
       const trimmed = text.trim()
       if (trimmed === '') return
       // First submission flips the home hero to the chat layout. The store
@@ -367,16 +414,17 @@ export async function runTui(): Promise<void> {
         void disposeAndExitWithRenderer(0)
         return
       }
-      // /mode <name>: swap the active work mode (preset id) in the store. The
-      // view reads `store.mode()` immediately; the agent rebuild on the new
-      // preset is a Stage-D concern (the TUI bundle does not yet mount
-      // agent-presets). Until then `/mode` is display-only + acknowledged.
+      // /mode <name>: swap the active work mode (preset id). The store flips
+      // immediately (the status bar + home banner re-render); the agent is
+      // rebuilt on the new preset by `switchMode` (dispose → create with the
+      // new preset meta + setup mount → rebind listeners → reset transcript).
+      // With no arg, echo the active mode.
       if (cmd.startsWith('/mode')) {
         const arg = trimmed.slice('/mode'.length).trim()
         if (arg === '') {
           process.stdout.write(`mode: ${store.mode()} (active)\n`)
         } else if (isWorkMode(arg)) {
-          store.setMode(arg as WorkMode)
+          await switchMode(arg as WorkMode)
           process.stdout.write(`mode: ${arg}\n`)
         } else {
           process.stdout.write(`unknown mode: ${arg}; available: standard, code, minimal, cordis\n`)
@@ -467,10 +515,56 @@ export async function runTui(): Promise<void> {
         void refreshSessions()
       })
     }
-    // Tab cycles the work mode in the store (display-only until the agent
-    // rebuild lands in Stage D). The view reads `store.mode()` and re-renders.
-    const onCycleMode = (): void => {
-      store.setMode(nextWorkMode(store.mode()))
+    // Tab cycles the work mode. The store flips immediately (re-render); the
+    // agent rebuild on the new preset happens via `switchMode`, mirroring
+    // `/mode`. Tab cycles to the next mode and triggers the rebuild.
+    const onCycleMode = async (): Promise<void> => {
+      await switchMode(nextWorkMode(store.mode()))
+    }
+    // Rebuild the agent on a new work-mode preset. Disposes the current
+    // agent, creates a fresh session on the new preset (the preset id flows
+    // onto the header via `meta.agentPreset` + `setup`'s `agentPresets.mount`),
+    // rebinds the session/event + agent/status listeners, resets the
+    // transcript, and refreshes the sidebar. A no-op when the mode is
+    // unchanged or the preset roster is not mounted.
+    const switchMode = async (mode: WorkMode): Promise<void> => {
+      if (agentPresets === undefined) { store.setMode(mode); return }
+      if (store.mode() === mode) return
+      store.setMode(mode)
+      disposeEvent?.()
+      disposeStatus?.()
+      await agentHandle.dispose()
+      try {
+        agentHandle = await agents.create({
+          sessionId: SessionId(`tui-${process.pid}-${Date.now()}`),
+          meta: { cwd: process.cwd(), agentPreset: mode },
+          agentOptions: {
+            provider: selectionRef.current?.provider ?? selection.provider,
+            model: selectionRef.current?.model ?? selection.model,
+          },
+          setup,
+        })
+        agent = agentHandle.agent
+        store.reset()
+        disposeEvent = ctx.on('session/event', (session, event) => {
+          if (session !== agent.session) return
+          if (event.type === 'tool/call') {
+            const { name, arguments: raw, callId } = event.data
+            let parsed: unknown
+            try { parsed = JSON.parse(raw) } catch { parsed = raw }
+            callArgs.set(callId, { name, args: parsed })
+          }
+          const view = viewFor(tools, event, cid => callArgs.get(cid), agent)
+          store.push({ sessionId: session.id, event, view, type: 'session/event' })
+        })
+        disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
+          if (subject !== agent) return
+          store.setStatus(status)
+        })
+        void refreshSessions()
+      } catch (error: unknown) {
+        process.stderr.write(`${NAME}: mode switch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+      }
     }
     // Session switching: dispose the current agent, resume the selected cold
     // session (or create a fresh one when the id is empty), rebind the

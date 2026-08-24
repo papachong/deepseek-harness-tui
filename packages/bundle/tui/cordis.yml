@@ -106,6 +106,18 @@
     section: |
       You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. Do not edit or write files, run formatters, commit, or otherwise carry out the plan. Explore first with non-mutating reads, searches, and checks. When ready, call exit_plan_mode with the complete plan markdown starting with a # title. If review rejects it, incorporate the feedback and present again.
 
+# ── work modes (agent presets) ─────────────────────────────────────────
+# The preset roster. The four shipped presets (standard/code/minimal/cordis)
+# map to the Tab-cyclable work modes; their display names live in
+# view/modes.ts. The runner resolves the shipped preset directory from its
+# own module URL (the `!!js` eval scope has no `import.meta`) and injects it
+# as an overlay `roots` patch before boot — mirroring apps/cli/src/profile-boot.ts.
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+    includeUserRoot: false
+
 - id: sessions
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
