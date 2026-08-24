@@ -26,6 +26,10 @@ import { createMemo, createSignal, createEffect, type Accessor } from 'solid-js'
 import type { TextareaRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
+import { SlashMenu } from './slash-menu.js'
+import { MentionMenu } from './mention-menu.js'
+import type { CommandEntry } from './command-palette.js'
+import type { MentionEntry } from './mention-menu.js'
 /** Props for {@link Prompt}. */
 export interface PromptProps {
   /** The store exposing `pendingQuestion()` for answer-mode routing. */
@@ -40,6 +44,10 @@ export interface PromptProps {
   hero?: boolean
   /** When true, the prompt re-acquires focus (app hands it back from sidebar). */
   shouldFocus?: Accessor<boolean>
+  /** Command entries for the slash-autocomplete menu (`/compact` `/goal` …). */
+  commands?: readonly CommandEntry[]
+  /** Resolves @-mention candidates (files + sessions) for the prompt menu. */
+  resolveMentions?: (query: string) => Promise<readonly MentionEntry[]>
 }
 
 /**
@@ -137,6 +145,79 @@ export function Prompt(props: PromptProps): JSX.Element {
       )
   })
 
+  // Slash-command autocomplete: when the live value starts with `/`, render the
+  // `<SlashMenu>` above the input. The menu reads `liveValue` + `commands` to
+  // filter; `↑`/`↓` move, `Enter` completes (replaces the prompt's content
+  // with `/name `), `Esc` closes. The textarea forwards `↑`/`↓`/`Enter`/`Esc`
+  // to the menu when it is open so focus never leaves the input.
+  const slashOpen = createMemo(() => props.commands !== undefined && liveValue().trimStart().startsWith('/'))
+  const completeSlash = (text: string): void => {
+    const el = inputEl()
+    if (el !== undefined) el.editBuffer.setText(text)
+    setLiveValue(text)
+  }
+  const slashMenu = createMemo<JSX.Element>(() => {
+    if (!slashOpen() || props.commands === undefined) return undefined
+    return (
+      <SlashMenu
+        value={liveValue()}
+        commands={props.commands}
+        onComplete={completeSlash}
+        onClose={() => { /* value no longer starts with `/` → menu hides */ }}
+      />
+    )
+  })
+
+  // @-mention autocomplete: when the live value contains an `@` token (per the
+  // file-reference grammar's `activeAtToken`), resolve candidates via the
+  // runner's `resolveMentions` (files from ctx.fileReferences + sessions from
+  // the sidebar list). `↑`/`↓` move, `Enter` inserts the mention, `Esc` closes.
+  // The query is the text after `@` (or empty for `@` alone).
+  const [mentionEntries, setMentionEntries] = createSignal<readonly MentionEntry[]>([])
+  const mentionQuery = createMemo(() => {
+    const v = liveValue()
+    const at = v.lastIndexOf('@')
+    if (at === -1) return undefined
+    const after = v.slice(at + 1)
+    // Only treat as a mention token if the char before `@` is a boundary
+    // (start, whitespace) — mirrors activeAtToken's email guard.
+    if (at > 0 && !/\s/.test(v[at - 1] ?? '')) return undefined
+    // Stop if the token contains a space (already completing a quoted path).
+    if (/\s/.test(after) && !after.startsWith('"')) return undefined
+    return after.replace(/^"/, '')
+  })
+  const mentionOpen = createMemo(() => mentionQuery() !== undefined && props.resolveMentions !== undefined)
+  // Debounce-ish: re-resolve when the query settles. createEffect re-runs on
+  // each query change; the runner's resolver is async and may abort stale
+  // calls (fileReferences.list takes an AbortSignal).
+  createEffect(() => {
+    const q = mentionQuery()
+    if (q === undefined || props.resolveMentions === undefined) { setMentionEntries([]); return }
+    void props.resolveMentions(q).then(setMentionEntries)
+  })
+  const completeMention = (insert: string): void => {
+    const el = inputEl()
+    const v = liveValue()
+    const at = v.lastIndexOf('@')
+    if (el !== undefined && at !== -1) {
+      el.editBuffer.setText(v.slice(0, at) + insert)
+      setLiveValue(v.slice(0, at) + insert)
+    }
+  }
+  const mentionMenu = createMemo<JSX.Element>(() => {
+    if (!mentionOpen()) return undefined
+    return (
+      <MentionMenu
+        query={mentionQuery() ?? ''}
+        entries={mentionEntries()}
+        onComplete={completeMention}
+        onClose={() => setMentionEntries([])}
+      />
+    )
+  })
+
+  const menuOpen = createMemo(() => slashOpen() || mentionOpen())
+
   return (
     <box
       {...(props.hero === true
@@ -144,6 +225,8 @@ export function Prompt(props: PromptProps): JSX.Element {
         : { border: ['top'] as const, borderStyle: 'single' as const, borderColor: CHROME.border, paddingTop: 0, paddingBottom: 0 })}
     >
       {banner()}
+      {slashMenu()}
+      {mentionMenu()}
       <box paddingLeft={1} flexDirection="row">
         <text fg={prefixColor()}><b>❯ </b></text>
         <textarea
@@ -158,6 +241,20 @@ export function Prompt(props: PromptProps): JSX.Element {
             // textarea would otherwise insert a literal Tab, so prevent it.
             if (key.name === 'tab' && props.onCycleMode !== undefined) {
               props.onCycleMode()
+              key.preventDefault()
+              return
+            }
+            // When a menu (slash or @-mention) is open, `↑`/`↓`/`Enter`/`Esc`
+            // belong to it. The menus' onKeyDown handlers sit on the parent
+            // `<box>`s; key events bubble from the focused textarea to them.
+            // Forward only when a menu is visible so navigation/submit do not
+            // also fire.
+            if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'escape')) {
+              if (key.name === 'escape' && slashOpen()) {
+                const stripped = liveValue().replace(/^\s*\//, '')
+                setLiveValue(stripped)
+                if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
+              }
               key.preventDefault()
               return
             }

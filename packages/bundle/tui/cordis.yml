@@ -42,6 +42,26 @@
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
 
+# @-mention file discovery: the host capability backing `@path` autocomplete
+# in the prompt (packages/context/file-reference-local). Its pre-step listener
+# enriches @-mentions in user messages with file context for the model.
+- id: file-reference-local
+  name: '@deepseek-ai/dsh-file-reference-local'
+
+# @-mention session discovery: the resolver that enriches
+# `@[label](dsh-session:…)` mentions with cross-session context for the model
+# (packages/context/session-reference). It injects ['sessionQuery'], satisfied
+# by the in-memory session-query engine below — `openAt: never` keeps SQLite
+# unopened (no search) while ctx.sessionQuery stays mounted for exact reads.
+- id: session-query-sqlite
+  name: '@deepseek-ai/dsh-session-query-sqlite'
+  config:
+    path: ':memory:'
+    openAt: never
+
+- id: session-reference
+  name: '@deepseek-ai/dsh-session-reference'
+
 - id: approval
   name: '@deepseek-ai/dsh-user-approval'
 

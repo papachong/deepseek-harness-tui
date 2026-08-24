@@ -24,6 +24,8 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-file-reference'
+import type {} from '@deepseek-ai/dsh-session-reference'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
@@ -36,6 +38,7 @@ import { createTuiRenderer, renderApp } from './view/renderer.js'
 import { theme, themeNames, switchTheme } from './view/theme.js'
 import { nextWorkMode, type WorkMode } from './view/modes.js'
 import type { CommandEntry } from './view/components/command-palette.js'
+import type { MentionEntry } from './view/components/mention-menu.js'
 import type { JSX } from '@opentui/solid'
 
 /** The valid work-mode preset ids accepted by `/mode`. */
@@ -235,6 +238,11 @@ export async function runTui(): Promise<void> {
   const sessionPersistence = ctx.get('sessionPersistence')
   const commands = ctx.get('commands')
   const agentPresets = ctx.get('agentPresets')
+  // @-mention backends: fileReferences backs `@path` autocomplete in the
+  // prompt; sessionReferenceResolver enriches `@[label](dsh-session:…)`
+  // mentions with cross-session context for the model. Both are optional —
+  // a composition without them simply offers no @-mention completion.
+  const fileReferences = ctx.get('fileReferences')
   if (agents === undefined || defaultModel === undefined || sessions === undefined) {
     throw new Error(`${NAME}: config must mount agent-spine + agent-default-model + sessions`)
   }
@@ -399,6 +407,7 @@ export async function runTui(): Promise<void> {
         commands: readonly CommandEntry[],
         onCycleMode?: () => void,
         onSelectSession?: (id: string) => void,
+        resolveMentions?: (query: string) => Promise<readonly MentionEntry[]>,
       ) => () => JSX.Element
     }
     const onSubmit = async (text: string): Promise<void> => {
@@ -476,6 +485,15 @@ export async function runTui(): Promise<void> {
       }
       // /sessions: refresh the sidebar session list.
       if (cmd === '/sessions') { void refreshSessions(); return }
+      // /clear: start a fresh session on the current work mode. Disposes the
+      // current agent, creates a new one (same preset, fresh session id), and
+      // rebinds listeners. Reuses the `onSelectSession('')` path — the empty
+      // id means "new session".
+      if (cmd === '/clear' || cmd === '/new') {
+        await onSelectSession('')
+        process.stdout.write(`cleared: new session on ${store.mode()}\n`)
+        return
+      }
       // Registered slash commands (/compact /feedback /goal /permission /plan
       // and any other plugin-registered command): hand the raw line to the
       // command registry, which parses, runs the handler, and logs the
@@ -587,7 +605,7 @@ export async function runTui(): Promise<void> {
         agentHandle = id === ''
           ? await agents.create({
             sessionId: SessionId(`tui-${process.pid}-${Date.now()}`),
-            meta: { cwd: process.cwd() },
+            meta: { cwd: process.cwd(), agentPreset: store.mode() },
             ...resumeOpts,
           })
           : await agents.resume({
@@ -645,6 +663,31 @@ export async function runTui(): Promise<void> {
       },
     }))
     const paletteEntries = [...localCommands, ...registryCommands]
+    // The @-mention completion source: `@path` calls fileReferences.list(agent,
+    // query, signal) (packages/context/file-reference-local), `@[label]`
+    // (session) reads store.sessions(). The runner exposes a single async
+    // resolver the prompt's @-menu calls; @-mentions in the submitted text are
+    // enriched by the file-reference/session-reference pre-step listeners
+    // automatically (no runner post-processing).
+    const resolveMentions = async (query: string): Promise<readonly MentionEntry[]> => {
+      const items: MentionEntry[] = []
+      // File candidates (when the host capability is mounted).
+      if (fileReferences !== undefined) {
+        const controller = new AbortController()
+        try {
+          const files = await fileReferences.list(agent, query, controller.signal)
+          for (const f of files) items.push({ kind: 'file', label: f.path, insert: `@${f.path}` })
+        } catch { /* aborted or query rejected */ }
+      }
+      // Session candidates (from the sidebar list). Match by id/title prefix.
+      const q = query.toLowerCase()
+      for (const s of store.sessions()) {
+        if (q === '' || s.id.toLowerCase().includes(q) || s.title.toLowerCase().includes(q)) {
+          items.push({ kind: 'session', label: s.title || s.id, insert: `@[${s.title || s.id}](dsh-session:${s.id})` })
+        }
+      }
+      return items.length > 10 ? items.slice(0, 10) : items
+    }
     await renderApp(
       createAppRoot(
         store,
@@ -653,6 +696,7 @@ export async function runTui(): Promise<void> {
         paletteEntries,
         onCycleMode,
         (id: string) => { void onSelectSession(id) },
+        resolveMentions,
       ),
       renderer,
     )

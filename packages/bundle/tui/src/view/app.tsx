@@ -27,6 +27,7 @@ import { CommandPalette } from './components/command-palette.js'
 import { Home } from './components/home.js'
 import { workMode } from './modes.js'
 import type { CommandEntry } from './components/command-palette.js'
+import type { MentionEntry } from './components/mention-menu.js'
 
 /** One merged transcript item: either a message or a tool card. */
 type TranscriptItem =
@@ -47,6 +48,8 @@ export interface AppProps {
   onCycleMode?: () => void
   /** Fired when the user selects a sidebar session row (Enter). */
   onSelectSession?: (id: string) => void
+  /** Resolves @-mention candidates (files + sessions) for the prompt menu. */
+  resolveMentions?: (query: string) => Promise<readonly MentionEntry[]>
 }
 
 /**
@@ -150,6 +153,8 @@ export function App(props: AppProps): JSX.Element {
         onSubmit={props.onSubmit}
         onOpenPalette={() => setPaletteOpen(true)}
         shouldFocus={shouldFocusPrompt}
+        commands={props.commands}
+        {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
       />
       <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
         <text fg={CHROME.textMuted}> mode: {modeName()} · session: {sessionId()} </text>
@@ -182,6 +187,7 @@ export function createAppRoot(
   commands: readonly CommandEntry[],
   onCycleMode?: () => void,
   onSelectSession?: (id: string) => void,
+  resolveMentions?: (query: string) => Promise<readonly MentionEntry[]>,
 ): () => JSX.Element {
   return () => (
     <App
@@ -191,6 +197,7 @@ export function createAppRoot(
       commands={commands}
       {...onCycleMode === undefined ? {} : { onCycleMode }}
       {...onSelectSession === undefined ? {} : { onSelectSession }}
+      {...resolveMentions === undefined ? {} : { resolveMentions }}
     />
   )
 }

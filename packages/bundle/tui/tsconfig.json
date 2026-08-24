@@ -31,11 +31,18 @@
     { "path": "../../compaction/compaction-basic" },
     { "path": "../../compaction/compaction-tool-result-pruner" },
     { "path": "../../compaction/command-compact" },
+    { "path": "../../context/file-reference" },
+    { "path": "../../context/file-reference-local" },
+    { "path": "../../context/session-reference" },
     { "path": "../../feedback/command-feedback" },
     { "path": "../../goal/goal" },
     { "path": "../../goal/goal-round-driver" },
     { "path": "../../goal/command-goal" },
     { "path": "../../plan/plan-mode" },
-    { "path": "../../runtime-diagnostics/invariants" }
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../session-query/session-query" },
+    { "path": "../../session-query/session-query-sqlite" },
+    { "path": "../../util/brand" },
+    { "path": "../../util/output-retention" }
   ]
 }
