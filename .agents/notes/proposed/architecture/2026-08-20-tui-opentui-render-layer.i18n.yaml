@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-20-tui-opentui-render-layer.md
 2026-08-20-tui-opentui-render-layer.md: c6951349a3b9c137da6335f65330fb2bf99f087c
-2026-08-20-tui-opentui-render-layer.zh.md: 16bd8fc02274ad780aece92ed72c3361e109bf3a
+2026-08-20-tui-opentui-render-layer.zh.md: 4f477543c706528d05f3e8f4c6cea7c21404d228

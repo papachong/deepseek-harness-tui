@@ -75,6 +75,18 @@ const OVERRIDES: Record<string, { license?: string; repo?: string }> = {
   '@modelcontextprotocol/server-filesystem': { license: 'MIT / Apache-2.0', repo: 'https://github.com/modelcontextprotocol/servers' },
   // No repository field in the published manifest.
   'node-addon-require-builtin': { repo: 'https://www.npmjs.com/package/node-addon-require-builtin' },
+  // @opentui platform packages are optionalDependencies: only the host
+  // platform's package is installed, so the pnpm store cannot answer for the
+  // other seven. The manifests all declare the same MIT license and repo.
+  '@opentui/core': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-darwin-arm64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-darwin-x64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-linux-arm64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-linux-arm64-musl': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-linux-x64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-linux-x64-musl': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-win32-arm64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
+  '@opentui/core-win32-x64': { license: 'MIT', repo: 'https://github.com/anomalyco/opentui' },
 }
 
 /**

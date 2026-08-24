@@ -8,7 +8,7 @@ Status: proposed
 
 dsh TUI bundle（`packages/bundle/tui/`）的 Phase 1–3 用的是**原始 `process.stdout.write` 渲染层**：流式文本和 `[tool/call]`/`[tool/result]` 行直接写出，无 ANSI SGR、无 markdown 折叠、无 card 组件、无 diff/todo/plan 渲染。Phase 2 渲染层（`src/render/{ansi,markdown,cards,projections}.ts`）是手搓最小实现——仅 GFM→ANSI，无语法高亮、无表格、无 KaTeX、无流式 markdown 折叠。
 
-[方案 note](2026-08-18-tui-solution-and-dev-plan.md) Phase 2 把 `@earendil-works/pi-tui`（前任 TUI 的渲染器）作为首选，40 个归档 `terminal.expected.txt` 快照为验收标准。但对 `/data/AI_Dev/opencode` 的调查揭示了一个**已发布、能力更强的替代**：`@opentui/solid`（npm `0.5.4`），opencode TUI 使用的 SolidJS 终端 reconciler，内置流式 `<markdown>` 组件，带 shiki 语法高亮、表格、KaTeX、conceal——正是 dsh 手搓层的缺口。
+[方案 note](2026-08-18-tui-solution-and-dev-plan.zh.md) Phase 2 把 `@earendil-works/pi-tui`（前任 TUI 的渲染器）作为首选，40 个归档 `terminal.expected.txt` 快照为验收标准。但对 `/data/AI_Dev/opencode` 的调查揭示了一个**已发布、能力更强的替代**：`@opentui/solid`（npm `0.5.4`），opencode TUI 使用的 SolidJS 终端 reconciler，内置流式 `<markdown>` 组件，带 shiki 语法高亮、表格、KaTeX、conceal——正是 dsh 手搓层的缺口。
 
 ## Spike 结果（2026-08-20 验证）
 

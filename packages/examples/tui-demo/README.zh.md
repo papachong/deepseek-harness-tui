@@ -22,7 +22,7 @@ stdin 承载一行任务（管道或键入）。bin 在 `boot()` **之前**读�
 
 ## Known Limitations and Deferred Work
 
-- **仅一轮**——bin 驱动单次 `agent.followup` turn，渲染后退出；无 REPL 循环、无 `--resume`、无 session 列表。多轮交互是 Phase 1 产品 TUI 的工作，见 [TUI 分析 Agent Note](../../../.agents/notes/proposed/architecture/2026-08-18-tui-terminal-product-analysis.md)。
+- **仅一轮**——bin 驱动单次 `agent.followup` turn，渲染后退出；无 REPL 循环、无 `--resume`、无 session 列表。多轮交互是 Phase 1 产品 TUI 的工作，见 [TUI 分析 Agent Note](../../../.agents/notes/proposed/architecture/2026-08-18-tui-terminal-product-analysis.zh.md)。
 - **无审批或 ask-user answerer**——原型渲染事件但既未注册 `approval/request` answerer 也未注册 `UserQuestionService` provider，故任何请求审批的 turn 返回 `'unavailable'`（fail-closed）。产品 TUI 必须两者都注册。
 - **原始 `process.stdout.write`，非终端渲染器**——流式文本与 `[tool/call]`/`[tool/result]` 行直接写出；无 ANSI SGR、无 markdown 折叠、无 card 组件、无 diff/todo/plan 渲染。渲染层是 Phase 2。
 - **stdin 是行缓冲，非 raw-mode**——`terminal: false` readline；无按键处理、无 autocomplete、无 slash-commands。raw-mode 键盘输入是 Phase 2。
