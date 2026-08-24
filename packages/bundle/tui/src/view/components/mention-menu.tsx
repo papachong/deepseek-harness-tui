@@ -17,8 +17,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { For, createMemo, createSignal } from 'solid-js'
-import type { KeyEvent } from '@opentui/core'
+import { For, createMemo } from 'solid-js'
 import { CHROME, ROLE_COLORS } from '../theme.js'
 
 /** The max entries shown at once. */
@@ -40,6 +39,8 @@ export interface MentionMenuProps {
   query: string
   /** The resolved candidates (files + sessions). */
   entries: readonly MentionEntry[]
+  /** The selected index (owned by the prompt, passed down). */
+  selectedIndex?: number
   /** Replaces the prompt's `@…` token with the selected `insert`. */
   onComplete: (insert: string) => void
   /** Closes the menu (Esc or blur). */
@@ -49,39 +50,15 @@ export interface MentionMenuProps {
 /**
  * Render the @-mention menu. When `entries` is empty, renders nothing. The
  * list sits above the prompt; `↑`/`↓` move the selection, `Enter` completes,
- * `Esc` closes.
+ * `Esc` closes. Selection state is owned by the prompt (which intercepts keys
+ * from the focused textarea); this component renders the highlighted row.
  * @param props - the menu props.
  * @returns the JSX element, or undefined when no candidates.
  */
 export function MentionMenu(props: MentionMenuProps): JSX.Element {
-  const [selected, setSelected] = createSignal(0)
   const visible = createMemo(() => props.entries.length > 0)
   const list = createMemo(() => props.entries.length > MAX_VISIBLE ? props.entries.slice(0, MAX_VISIBLE) : props.entries)
-
-  const move = (delta: number): void => {
-    const len = list().length
-    if (len === 0) return
-    setSelected((prev) => {
-      const next = prev + delta
-      if (next < 0) return 0
-      if (next >= len) return len - 1
-      return next
-    })
-  }
-
-  const onKey = (key: KeyEvent): void => {
-    if (!visible()) return
-    if (key.name === 'up') { move(-1); key.preventDefault(); return }
-    if (key.name === 'down') { move(1); key.preventDefault(); return }
-    if (key.name === 'escape') { props.onClose(); return }
-    if (key.name === 'return' || key.name === 'enter') {
-      const entry = list()[selected()]
-      if (entry !== undefined) {
-        props.onComplete(entry.insert)
-        key.preventDefault()
-      }
-    }
-  }
+  const selected = createMemo(() => props.selectedIndex ?? 0)
 
   const menu = createMemo<JSX.Element>(() => {
     if (!visible()) return undefined
@@ -93,7 +70,6 @@ export function MentionMenu(props: MentionMenuProps): JSX.Element {
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
-        onKeyDown={onKey}
       >
         <For each={list()}>
           {(entry, index) => {

@@ -117,6 +117,8 @@ export function App(props: AppProps): JSX.Element {
         store={props.store}
         onSubmit={props.onSubmit}
         {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
+        {...props.commands === undefined ? {} : { commands: props.commands }}
+        {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
       />
     )
   })

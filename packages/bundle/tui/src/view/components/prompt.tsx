@@ -22,11 +22,11 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createMemo, createSignal, createEffect, type Accessor } from 'solid-js'
+import { createMemo, createSignal, createEffect, onCleanup, type Accessor } from 'solid-js'
 import type { TextareaRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
-import { SlashMenu } from './slash-menu.js'
+import { SlashMenu, slashToken } from './slash-menu.js'
 import { MentionMenu } from './mention-menu.js'
 import type { CommandEntry } from './command-palette.js'
 import type { MentionEntry } from './mention-menu.js'
@@ -150,7 +150,16 @@ export function Prompt(props: PromptProps): JSX.Element {
   // filter; `↑`/`↓` move, `Enter` completes (replaces the prompt's content
   // with `/name `), `Esc` closes. The textarea forwards `↑`/`↓`/`Enter`/`Esc`
   // to the menu when it is open so focus never leaves the input.
-  const slashOpen = createMemo(() => props.commands !== undefined && liveValue().trimStart().startsWith('/'))
+  // Slash menu is open when the value starts with `/` AND the token after it
+  // has no space (i.e. the user is still typing the command name). Once the
+  // command is completed (ends with ` `), the menu closes so Enter submits.
+  const slashOpen = createMemo(() => {
+    if (props.commands === undefined) return false
+    const v = liveValue().trimStart()
+    if (!v.startsWith('/')) return false
+    // Still typing the command name if there's no space after the slash token.
+    return !/\s/.test(v.slice(1))
+  })
   const completeSlash = (text: string): void => {
     const el = inputEl()
     if (el !== undefined) el.editBuffer.setText(text)
@@ -162,6 +171,7 @@ export function Prompt(props: PromptProps): JSX.Element {
       <SlashMenu
         value={liveValue()}
         commands={props.commands}
+        selectedIndex={menuIndex()}
         onComplete={completeSlash}
         onClose={() => { /* value no longer starts with `/` → menu hides */ }}
       />
@@ -174,6 +184,7 @@ export function Prompt(props: PromptProps): JSX.Element {
   // the sidebar list). `↑`/`↓` move, `Enter` inserts the mention, `Esc` closes.
   // The query is the text after `@` (or empty for `@` alone).
   const [mentionEntries, setMentionEntries] = createSignal<readonly MentionEntry[]>([])
+  const [mentionActive, setMentionActive] = createSignal(false)
   const mentionQuery = createMemo(() => {
     const v = liveValue()
     const at = v.lastIndexOf('@')
@@ -187,13 +198,19 @@ export function Prompt(props: PromptProps): JSX.Element {
     return after.replace(/^"/, '')
   })
   const mentionOpen = createMemo(() => mentionQuery() !== undefined && props.resolveMentions !== undefined)
-  // Debounce-ish: re-resolve when the query settles. createEffect re-runs on
-  // each query change; the runner's resolver is async and may abort stale
-  // calls (fileReferences.list takes an AbortSignal).
+  // Resolve @-mention candidates when the query changes. The resolver is async
+  // (fileReferences.list builds a workspace index on first call); set a flag
+  // so the menu renders a "…" placeholder while pending, then swaps to the
+  // entries. The flag also keeps the menu mounted across re-resolves.
   createEffect(() => {
     const q = mentionQuery()
-    if (q === undefined || props.resolveMentions === undefined) { setMentionEntries([]); return }
-    void props.resolveMentions(q).then(setMentionEntries)
+    if (q === undefined || props.resolveMentions === undefined) { setMentionEntries([]); setMentionActive(false); return }
+    setMentionActive(true)
+    let cancelled = false
+    void props.resolveMentions(q).then((entries) => {
+      if (!cancelled) { setMentionEntries(entries); setMentionActive(false) }
+    }).catch(() => { if (!cancelled) setMentionActive(false) })
+    onCleanup(() => { cancelled = true })
   })
   const completeMention = (insert: string): void => {
     const el = inputEl()
@@ -206,10 +223,24 @@ export function Prompt(props: PromptProps): JSX.Element {
   }
   const mentionMenu = createMemo<JSX.Element>(() => {
     if (!mentionOpen()) return undefined
+    // While resolving (first call indexes the workspace), show a placeholder
+    // so the menu is visibly mounted rather than blank.
+    if (mentionActive() && mentionEntries().length === 0) {
+      return (
+        <MentionMenu
+          query={mentionQuery() ?? ''}
+          entries={[{ kind: 'file', label: '…', insert: '' }]}
+          selectedIndex={0}
+          onComplete={() => {}}
+          onClose={() => setMentionEntries([])}
+        />
+      )
+    }
     return (
       <MentionMenu
         query={mentionQuery() ?? ''}
         entries={mentionEntries()}
+        selectedIndex={menuIndex()}
         onComplete={completeMention}
         onClose={() => setMentionEntries([])}
       />
@@ -217,6 +248,47 @@ export function Prompt(props: PromptProps): JSX.Element {
   })
 
   const menuOpen = createMemo(() => slashOpen() || mentionOpen())
+  // The menus render in sibling <box> elements whose onKeyDown cannot receive
+  // key events from the focused textarea (OpenTUI does not bubble
+  // preventDefault'd keys to parents). So the prompt owns the menu navigation
+  // state and forwards ↑/↓/Enter/Esc here, dispatching to the active menu's
+  // complete callback.
+  const [menuIndex, setMenuIndex] = createSignal(0)
+  const menuItems = createMemo<readonly { label: string; insert: string }[]>(() => {
+    if (slashOpen() && props.commands !== undefined) {
+      const t = slashToken(liveValue())
+      const all = props.commands
+      const matches = t === '' ? all : all.filter(c => c.label.toLowerCase().includes(t))
+      return (matches.length > 8 ? matches.slice(0, 8) : matches).map(c => ({ label: c.label, insert: `${c.label} ` }))
+    }
+    return mentionEntries()
+  })
+  const menuMove = (delta: number): void => {
+    const len = menuItems().length
+    if (len === 0) return
+    setMenuIndex((prev) => {
+      const next = prev + delta
+      if (next < 0) return 0
+      if (next >= len) return len - 1
+      return next
+    })
+  }
+  // Keep menuIndex in bounds when the filtered list changes.
+  createEffect(() => {
+    const len = menuItems().length
+    setMenuIndex(prev => prev >= len ? Math.max(0, len - 1) : prev)
+  })
+  const menuComplete = (): void => {
+    const items = menuItems()
+    const entry = items[menuIndex()]
+    if (entry === undefined) return
+    if (slashOpen()) {
+      completeSlash(entry.insert)
+    } else {
+      completeMention(entry.insert)
+    }
+    setMenuIndex(0)
+  }
 
   return (
     <box
@@ -244,17 +316,39 @@ export function Prompt(props: PromptProps): JSX.Element {
               key.preventDefault()
               return
             }
-            // When a menu (slash or @-mention) is open, `↑`/`↓`/`Enter`/`Esc`
-            // belong to it. The menus' onKeyDown handlers sit on the parent
-            // `<box>`s; key events bubble from the focused textarea to them.
-            // Forward only when a menu is visible so navigation/submit do not
-            // also fire.
-            if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'escape')) {
-              if (key.name === 'escape' && slashOpen()) {
-                const stripped = liveValue().replace(/^\s*\//, '')
-                setLiveValue(stripped)
-                if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
+            // When a menu is open, it owns ↑/↓/Enter/Esc. The menus' onKeyDown
+            // is on parent <box> elements, but OpenTUI delivers key events to
+            // the focused textarea first; if the textarea's onKeyDown calls
+            // preventDefault, the event does NOT bubble to the parent. So the
+            // menu must complete/submit HERE (not rely on bubbling), and then
+            // preventDefault to stop the native newline/submit.
+            if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'kpenter' || key.name === 'escape')) {
+              key.preventDefault()
+              if (key.name === 'up') { menuMove(-1); return }
+              if (key.name === 'down') { menuMove(1); return }
+              if (key.name === 'escape') {
+                if (slashOpen()) {
+                  const stripped = liveValue().replace(/^\s*\//, '')
+                  setLiveValue(stripped)
+                  if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
+                }
+                setMentionEntries([])
+                return
               }
+              // Enter: complete the selected menu item.
+              menuComplete()
+              return
+            }
+            // Bare Enter (no modifiers) submits the input. OpenTUI's
+            // TextareaRenderable binds bare `return` to `newline` (not
+            // `submit`), so without this interception Enter inserts a newline.
+            // opencode overrides this via @opentui/keymap's managed textarea
+            // layer; dsh-tui does not use that layer, so intercept here:
+            // bare Enter → handleSubmit + preventDefault. Shift/Ctrl/Alt+Enter
+            // inserts a newline.
+            if ((key.name === 'return' || key.name === 'enter' || key.name === 'kpenter')
+              && !key.shift && !key.ctrl && !key.meta) {
+              handleSubmit(liveValue())
               key.preventDefault()
               return
             }
@@ -273,6 +367,10 @@ export function Prompt(props: PromptProps): JSX.Element {
             }
           }}
           onSubmit={() => {
+            // Fallback: the native TextareaRenderable fires onSubmit on
+            // meta+return / linefeed. The bare-Enter path in onKeyDown
+            // handles the common case; this covers the modifier-bound submit
+            // the textarea still owns.
             const value = liveValue()
             handleSubmit(value)
           }}

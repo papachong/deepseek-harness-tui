@@ -423,38 +423,10 @@ export async function runTui(): Promise<void> {
         void disposeAndExitWithRenderer(0)
         return
       }
-      // /mode <name>: swap the active work mode (preset id). The store flips
-      // immediately (the status bar + home banner re-render); the agent is
-      // rebuilt on the new preset by `switchMode` (dispose → create with the
-      // new preset meta + setup mount → rebind listeners → reset transcript).
-      // With no arg, echo the active mode.
-      if (cmd.startsWith('/mode')) {
-        const arg = trimmed.slice('/mode'.length).trim()
-        if (arg === '') {
-          process.stdout.write(`mode: ${store.mode()} (active)\n`)
-        } else if (isWorkMode(arg)) {
-          await switchMode(arg as WorkMode)
-          process.stdout.write(`mode: ${arg}\n`)
-        } else {
-          process.stdout.write(`unknown mode: ${arg}; available: standard, code, minimal, cordis\n`)
-        }
-        return
-      }
-      // /theme <name>: swap the active color theme at runtime. No agent round-trip.
-      if (cmd.startsWith('/theme')) {
-        const arg = trimmed.slice('/theme'.length).trim()
-        if (arg === '') {
-          process.stdout.write(`themes: ${themeNames().join(', ')} (active: ${theme().name})\n`)
-        } else if (switchTheme(arg)) {
-          process.stdout.write(`theme: ${arg}\n`)
-        } else {
-          process.stdout.write(`unknown theme: ${arg}; available: ${themeNames().join(', ')}\n`)
-        }
-        return
-      }
       // /model <provider>/<model>: swap the model selection in place. The
       // ModelSelectionRef mutates; the next step picks it up (model-selection.ts).
       // No agent rebuild. /model with no arg lists available models async.
+      // Checked BEFORE /mode so `/model` does not match `/mode`'s prefix.
       if (cmd.startsWith('/model')) {
         const arg = trimmed.slice('/model'.length).trim()
         if (arg === '') {
@@ -480,6 +452,39 @@ export async function runTui(): Promise<void> {
           store.setModel(next)
           void defaultModel.saveSelection(next)
           process.stdout.write(`model: ${provider}/${model}\n`)
+        }
+        return
+      }
+      // /mode <name>: swap the active work mode (preset id). The store flips
+      // immediately (the status bar + home banner re-render); the agent is
+      // rebuilt on the new preset by `switchMode` (dispose → create with the
+      // new preset meta + setup mount → rebind listeners → reset transcript).
+      // With no arg, echo the active mode.
+      if (cmd.startsWith('/mode ')) {
+        const arg = trimmed.slice('/mode'.length).trim()
+        if (arg === '') {
+          process.stdout.write(`mode: ${store.mode()} (active)\n`)
+        } else if (isWorkMode(arg)) {
+          await switchMode(arg as WorkMode)
+          process.stdout.write(`mode: ${arg}\n`)
+        } else {
+          process.stdout.write(`unknown mode: ${arg}; available: standard, code, minimal, cordis\n`)
+        }
+        return
+      }
+      if (cmd === '/mode') {
+        process.stdout.write(`mode: ${store.mode()} (active)\n`)
+        return
+      }
+      // /theme <name>: swap the active color theme at runtime. No agent round-trip.
+      if (cmd.startsWith('/theme')) {
+        const arg = trimmed.slice('/theme'.length).trim()
+        if (arg === '') {
+          process.stdout.write(`themes: ${themeNames().join(', ')} (active: ${theme().name})\n`)
+        } else if (switchTheme(arg)) {
+          process.stdout.write(`theme: ${arg}\n`)
+        } else {
+          process.stdout.write(`unknown theme: ${arg}; available: ${themeNames().join(', ')}\n`)
         }
         return
       }

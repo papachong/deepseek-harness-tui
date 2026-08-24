@@ -21,6 +21,8 @@ import { CHROME, ROLE_COLORS } from '../theme.js'
 import { workMode } from '../modes.js'
 import type { TuiStore } from '../store.js'
 import { Prompt } from './prompt.js'
+import type { CommandEntry } from './command-palette.js'
+import type { MentionEntry } from './mention-menu.js'
 
 /** Props for {@link Home}. */
 export interface HomeProps {
@@ -30,16 +32,10 @@ export interface HomeProps {
   onSubmit: (text: string) => void
   /** Fired when the user presses Tab to cycle the work mode. */
   onCycleMode?: () => void
-}
-
-/** Props for {@link Home}. */
-export interface HomeProps {
-  /** The reactive store the banner + prompt read. */
-  store: TuiStore
-  /** Fired when the user submits a task line (the runner flips page → chat). */
-  onSubmit: (text: string) => void
-  /** Fired when the user presses Tab to cycle the work mode. */
-  onCycleMode?: () => void
+  /** Command entries for the slash-autocomplete menu. */
+  commands?: readonly CommandEntry[]
+  /** Resolves @-mention candidates (files + sessions). */
+  resolveMentions?: (query: string) => Promise<readonly MentionEntry[]>
 }
 
 /**
@@ -61,6 +57,8 @@ export function Home(props: HomeProps): JSX.Element {
         onSubmit={props.onSubmit}
         hero
         {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
+        {...props.commands === undefined ? {} : { commands: props.commands }}
+        {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
       />
     </box>
   )

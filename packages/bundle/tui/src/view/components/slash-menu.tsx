@@ -16,8 +16,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { For, createMemo, createSignal } from 'solid-js'
-import type { KeyEvent } from '@opentui/core'
+import { For, createMemo } from 'solid-js'
 import { CHROME, ROLE_COLORS } from '../theme.js'
 import type { CommandEntry } from './command-palette.js'
 
@@ -30,6 +29,8 @@ export interface SlashMenuProps {
   value: string
   /** The command entries to filter (local + registry). */
   commands: readonly CommandEntry[]
+  /** The selected index (owned by the prompt, passed down). */
+  selectedIndex?: number
   /** Replaces the prompt's content with the completed `/<name> `. */
   onComplete: (text: string) => void
   /** Closes the menu (Esc or blur). */
@@ -42,7 +43,7 @@ export interface SlashMenuProps {
  * @param value - the live prompt value.
  * @returns the lowercased token after `/` (or empty when just `/`).
  */
-function slashToken(value: string): string {
+export function slashToken(value: string): string {
   const slash = value.indexOf('/')
   if (slash === -1) return ''
   const rest = value.slice(slash + 1)
@@ -58,7 +59,6 @@ function slashToken(value: string): string {
  * @returns the JSX element, or undefined when no menu should show.
  */
 export function SlashMenu(props: SlashMenuProps): JSX.Element {
-  const [selected, setSelected] = createSignal(0)
   const token = createMemo(() => slashToken(props.value))
   const filtered = createMemo<readonly CommandEntry[]>(() => {
     const t = token()
@@ -68,31 +68,7 @@ export function SlashMenu(props: SlashMenuProps): JSX.Element {
     return matches.length > MAX_VISIBLE ? matches.slice(0, MAX_VISIBLE) : matches
   })
   const visible = createMemo(() => filtered().length > 0 && props.value.trimStart().startsWith('/'))
-
-  const move = (delta: number): void => {
-    const len = filtered().length
-    if (len === 0) return
-    setSelected((prev) => {
-      const next = prev + delta
-      if (next < 0) return 0
-      if (next >= len) return len - 1
-      return next
-    })
-  }
-
-  const onKey = (key: KeyEvent): void => {
-    if (!visible()) return
-    if (key.name === 'up') { move(-1); key.preventDefault(); return }
-    if (key.name === 'down') { move(1); key.preventDefault(); return }
-    if (key.name === 'escape') { props.onClose(); return }
-    if (key.name === 'return' || key.name === 'enter') {
-      const entry = filtered()[selected()]
-      if (entry !== undefined) {
-        props.onComplete(`${entry.label} `)
-        key.preventDefault()
-      }
-    }
-  }
+  const selected = createMemo(() => props.selectedIndex ?? 0)
 
   const menu = createMemo<JSX.Element>(() => {
     if (!visible()) return undefined
@@ -104,7 +80,6 @@ export function SlashMenu(props: SlashMenuProps): JSX.Element {
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
-        onKeyDown={onKey}
       >
         <For each={filtered()}>
           {(cmd, index) => {
