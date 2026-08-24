@@ -16,7 +16,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { For, createMemo } from 'solid-js'
+import { For, createMemo, createSignal } from 'solid-js'
 import { useTerminalDimensions } from '@opentui/solid'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
@@ -32,12 +32,20 @@ export interface SidebarProps {
   store: TuiStore
   /** The current session id (to highlight the active row). */
   currentSessionId: string
+  /** Fired when the user selects a session row (Enter). */
+  onSelectSession?: (id: string) => void
+  /** True when the sidebar holds focus (app toggles via global keybind). */
+  focused?: () => boolean
+  /** Fired when the sidebar yields focus back to the prompt (Esc). */
+  onBlur?: () => void
 }
 
 /**
  * Render the sidebar: a header (cwd/model) + session list. When the terminal
  * is narrow (≤120 cols) the sidebar is an absolute overlay with a translucent
- * background; when wide it sits inline as a fixed-width column.
+ * background; when wide it sits inline as a fixed-width column. When focused,
+ * the container is `focusable` and `↑`/`↓` move the selection, `Enter`
+ * selects, `Esc` returns focus to the prompt.
  * @param props - the sidebar props.
  * @returns the JSX element for the sidebar, or undefined when there are no sessions.
  */
@@ -45,6 +53,31 @@ export function Sidebar(props: SidebarProps): JSX.Element {
   const dims = useTerminalDimensions()
   const inline = createMemo(() => (dims().width > INLINE_THRESHOLD))
   const list = createMemo(() => props.store.sessions())
+  const [selected, setSelected] = createSignal(0)
+  const isFocused = createMemo(() => props.focused?.() === true)
+
+  const move = (delta: number): void => {
+    const len = list().length
+    if (len === 0) return
+    setSelected((prev) => {
+      const next = prev + delta
+      if (next < 0) return 0
+      if (next >= len) return len - 1
+      return next
+    })
+  }
+
+  const onKey = (key: { name: string }): void => {
+    if (!isFocused()) return
+    if (key.name === 'up') { move(-1); return }
+    if (key.name === 'down') { move(1); return }
+    if (key.name === 'return' || key.name === 'enter') {
+      const item = list()[selected()]
+      if (item !== undefined) props.onSelectSession?.(item.id)
+      return
+    }
+    if (key.name === 'escape') { props.onBlur?.(); return }
+  }
 
   const container = createMemo<JSX.Element>(() => {
     const style = inline()
@@ -54,12 +87,16 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       <box
         border={['left']}
         borderStyle="single"
-        borderColor={CHROME.border}
+        borderColor={isFocused() ? CHROME.borderActive : CHROME.border}
         backgroundColor={CHROME.bgPanel}
         {...style}
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
+        focusable
+        focused={isFocused()}
+        focusedBorderColor={CHROME.borderActive}
+        onKeyDown={onKey}
       >
         <box flexDirection="row">
           <text fg={CHROME.textMuted}>sessions</text>
@@ -67,12 +104,13 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           <text fg={CHROME.textMuted}>{list().length}</text>
         </box>
         <For each={list()}>
-          {(item) => {
+          {(item, index) => {
             const active = item.id === props.currentSessionId
+            const isSelected = createMemo(() => index() === selected() && isFocused())
             const dotColor = item.live ? STATUS_COLORS.completed : CHROME.textMuted
             return (
               <box flexDirection="row">
-                <text fg={dotColor}>{active ? '▸' : ' '} </text>
+                <text fg={dotColor}>{isSelected() ? '▸' : active ? '▸' : ' '} </text>
                 <text fg={active ? ROLE_COLORS.assistant : CHROME.text}>{item.title || item.id}</text>
               </box>
             )

@@ -22,7 +22,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createMemo, createSignal, type Accessor } from 'solid-js'
+import { createMemo, createSignal, createEffect, type Accessor } from 'solid-js'
 import type { TextareaRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
@@ -38,6 +38,8 @@ export interface PromptProps {
   onCycleMode?: () => void
   /** Hero layout (home page): no top border, centered by the parent `<Home>`. */
   hero?: boolean
+  /** When true, the prompt re-acquires focus (app hands it back from sidebar). */
+  shouldFocus?: Accessor<boolean>
 }
 
 /**
@@ -67,8 +69,13 @@ export function Prompt(props: PromptProps): JSX.Element {
     props.onSubmit(value)
   }
 
-
   const [inputEl, setInputEl] = createSignal<TextareaRenderable | undefined>(undefined)
+  // When the app hands focus back to the prompt (e.g. after sidebar nav),
+  // call `.focus()` on the textarea. OpenTUI has no focusManager, so the app
+  // owns the region toggle and signals it via `shouldFocus`.
+  createEffect(() => {
+    if (props.shouldFocus?.() === true) inputEl()?.focus()
+  })
   // Track the live content via onContentChange so submit can read the current
   // value without reaching into the textarea's internal edit buffer.
   const [liveValue, setLiveValue] = createSignal('')

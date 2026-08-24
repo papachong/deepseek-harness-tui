@@ -223,10 +223,13 @@ export async function runTui(): Promise<void> {
 
   // Create or resume one agent. --resume loads a persisted cold session and
   // rebuilds the agent on it (mirror api-proxy.ts:1626); absent → fresh session.
+  // The agent is held in a `let` (not `const`) because session switching
+  // disposes + re-creates it; the event/status listeners rebind to the new
+  // agent via `rebind`.
   const setup = (agentCtx: Context) => {
     installModelSelection(agentCtx, selectionRef)
   }
-  const { agent } = resumeSessionId === undefined
+  let agentHandle = resumeSessionId === undefined
     ? await agents.create({
       sessionId: SessionId(`tui-${process.pid}`),
       meta: { cwd: process.cwd() },
@@ -238,6 +241,7 @@ export async function runTui(): Promise<void> {
       agentOptions: { provider: selection.provider, model: selection.model },
       setup,
     })
+  let agent = agentHandle.agent
 
   // Subscribe BEFORE the loop so no event is missed (tui-demo runner.ts:114-125).
   // session/event: (Session, SessionEvent) => void (session/src/index.ts:76).
@@ -287,7 +291,11 @@ export async function runTui(): Promise<void> {
   // tool/call commits to state.tools).
   const tools = ctx.get('tools')
   const callArgs = new Map<string, { name: string; args: unknown }>()
-  const disposeEvent = ctx.on('session/event', (session, event) => {
+  // The session/event + agent/status listeners rebind to the current agent so
+  // session switching (switchSession) can swap the agent without re-subscribing.
+  // The closures read `agent` (a `let`) at call time; reassigning `agent`
+  // retargets them. Disposers are retained so the finally block can tear down.
+  let disposeEvent: (() => void) | undefined = ctx.on('session/event', (session, event) => {
     if (session !== agent.session) return
     // Record the call's name+args synchronously on tool/call so tool/result
     // (which carries only callId) can back-resolve without waiting for the
@@ -301,7 +309,7 @@ export async function runTui(): Promise<void> {
     const view = viewFor(tools, event, id => callArgs.get(id), agent)
     store.push({ sessionId: session.id, event, view, type: 'session/event' })
   })
-  const disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
+  let disposeStatus: (() => void) | undefined = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject !== agent) return
     store.setStatus(status)
   })
@@ -338,9 +346,10 @@ export async function runTui(): Promise<void> {
       createAppRoot: (
         store: TuiStore,
         onSubmit: (text: string) => void,
-        currentSessionId: string,
+        currentSessionId: () => string,
         commands: readonly CommandEntry[],
         onCycleMode?: () => void,
+        onSelectSession?: (id: string) => void,
       ) => () => JSX.Element
     }
     const onSubmit = (text: string): void => {
@@ -433,6 +442,56 @@ export async function runTui(): Promise<void> {
     const onCycleMode = (): void => {
       store.setMode(nextWorkMode(store.mode()))
     }
+    // Session switching: dispose the current agent, resume the selected cold
+    // session (or create a fresh one when the id is empty), rebind the
+    // session/event + agent/status listeners to the new agent, reset the
+    // transcript, and refresh the sidebar. Mirrors the launch path's
+    // create/resume + rebind shape. The id is empty for a brand-new session
+    // (the `/clear` gesture reuses this path).
+    const onSelectSession = async (id: string): Promise<void> => {
+      disposeEvent?.()
+      disposeStatus?.()
+      await agentHandle.dispose()
+      try {
+        const resumeOpts = {
+          agentOptions: {
+            provider: selectionRef.current?.provider ?? selection.provider,
+            model: selectionRef.current?.model ?? selection.model,
+          },
+          setup,
+        }
+        agentHandle = id === ''
+          ? await agents.create({
+            sessionId: SessionId(`tui-${process.pid}-${Date.now()}`),
+            meta: { cwd: process.cwd() },
+            ...resumeOpts,
+          })
+          : await agents.resume({
+            resumeSessionId: SessionId(id),
+            ...resumeOpts,
+          })
+        agent = agentHandle.agent
+        store.reset()
+        disposeEvent = ctx.on('session/event', (session, event) => {
+          if (session !== agent.session) return
+          if (event.type === 'tool/call') {
+            const { name, arguments: raw, callId } = event.data
+            let parsed: unknown
+            try { parsed = JSON.parse(raw) } catch { parsed = raw }
+            callArgs.set(callId, { name, args: parsed })
+          }
+          const view = viewFor(tools, event, cid => callArgs.get(cid), agent)
+          store.push({ sessionId: session.id, event, view, type: 'session/event' })
+        })
+        disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
+          if (subject !== agent) return
+          store.setStatus(status)
+        })
+        void refreshSessions()
+      } catch (error: unknown) {
+        process.stderr.write(`${NAME}: session switch failed: ${error instanceof Error ? error.message : String(error)}\n`)
+      }
+    }
     // Build the command palette entries (model/session/theme commands). The
     // palette is opened via Ctrl-P from the prompt.
     const commands: CommandEntry[] = [
@@ -441,7 +500,17 @@ export async function runTui(): Promise<void> {
       { label: 'Switch mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
       { label: 'Refresh sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
     ]
-    await renderApp(createAppRoot(store, onSubmit, agent.session.id, commands, onCycleMode), renderer)
+    await renderApp(
+      createAppRoot(
+        store,
+        onSubmit,
+        () => agent.session.id,
+        commands,
+        onCycleMode,
+        (id: string) => { void onSelectSession(id) },
+      ),
+      renderer,
+    )
     // renderApp() resolves after mounting + renderer.start(); it does NOT
     // block. The renderer's frame loop + stdin key dispatch run on Bun's
     // event loop, but the runner's control flow would fall through to the

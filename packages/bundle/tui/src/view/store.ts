@@ -171,6 +171,13 @@ export interface TuiStore {
    */
   setMode(mode: WorkMode): void
   /**
+   * Reset the transcript for a session switch. Clears messages, tools, todos,
+   * and plan state but keeps the page (chat) and mode so the surface stays
+   * continuous. Called by the runner's `onSelectSession`.
+   * @returns void; mutates state synchronously.
+   */
+  reset(): void
+  /**
    * Push a pending question into the store and await its answer. The `<Prompt>`
    * component routes a submitted line to resolve the returned promise when a
    * question is pending. This is the v1 answer to the OpenTUI raw-mode vs
@@ -278,6 +285,16 @@ export function createTuiStore(): TuiStore {
     setState('status', status)
   }
 
+  const reset = (): void => {
+    setState(produce((s: StoreState) => {
+      s.messages.length = 0
+      s.tools.length = 0
+      s.todos.length = 0
+      s.planActive = false
+      s.status = 'idle'
+    }))
+  }
+
   const awaitAnswer = (question: string): Promise<string> => {
     setPendingQuestion(question)
     return new Promise<string>((resolve) => {
@@ -320,6 +337,7 @@ export function createTuiStore(): TuiStore {
     setSessions,
     setPage,
     setMode,
+    reset,
     awaitAnswer,
     pendingQuestion,
     resolveAnswer,

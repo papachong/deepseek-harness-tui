@@ -13,7 +13,7 @@
  * @module @deepseek-ai/dsh-tui/view/app
  */
 
-import { type JSX } from '@opentui/solid'
+import { type JSX, useKeyboard } from '@opentui/solid'
 import { For, createMemo, createSignal } from 'solid-js'
 import { CHROME } from './theme.js'
 import type { TuiStore, MessageEntry, ToolEntry } from './store.js'
@@ -39,12 +39,14 @@ export interface AppProps {
   store: TuiStore
   /** Fired when the user submits a task line (no pending question). */
   onSubmit: (text: string) => void
-  /** The current session id (for sidebar highlight). */
-  currentSessionId: string
+  /** The current session id, or an accessor for it (sidebar highlight). */
+  currentSessionId: string | (() => string)
   /** Available commands for the command palette (populated by runner). */
   commands: readonly CommandEntry[]
   /** Fired when the user cycles the work mode with Tab (runner rebuilds agent). */
   onCycleMode?: () => void
+  /** Fired when the user selects a sidebar session row (Enter). */
+  onSelectSession?: (id: string) => void
 }
 
 /**
@@ -83,7 +85,25 @@ export function App(props: AppProps): JSX.Element {
   )
   const todosBlock = createMemo(() => <Todos todos={props.store.state.todos} />)
   const [paletteOpen, setPaletteOpen] = createSignal(false)
+  // Sidebar↔prompt focus toggle: OpenTUI has no focusManager, so the app owns
+  // the region via a signal. Ctrl-S flips it; the sidebar and prompt each
+  // read the signal to focus/blur their element.
+  const [sidebarFocused, setSidebarFocused] = createSignal(false)
+  const shouldFocusPrompt = createMemo(() => !sidebarFocused())
+  // Global keybind: Ctrl-S toggles focus between the prompt and the sidebar
+  // (OpenTUI has no focusManager, so the app owns the region toggle). The
+  // sidebar reads `sidebarFocused` to focus/blur; the prompt reads
+  // `shouldFocusPrompt` (its inverse). The key is caught globally so it
+  // works regardless of which region currently holds focus.
+  useKeyboard((key) => {
+    if (key.ctrl && key.name === 's') {
+      setSidebarFocused(prev => !prev)
+    }
+  })
   const page = createMemo(() => props.store.state.page)
+  const sessionId = createMemo(() =>
+    typeof props.currentSessionId === 'function' ? props.currentSessionId() : props.currentSessionId,
+  )
   const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
   // Home page: centered banner + hero prompt. The first submission flips the
   // store page to 'chat' in the runner's onSubmit, which swaps this branch out.
@@ -117,12 +137,23 @@ export function App(props: AppProps): JSX.Element {
             <Plan active={props.store.state.planActive} />
           </scrollbox>
         </box>
-        <Sidebar store={props.store} currentSessionId={props.currentSessionId} />
+        <Sidebar
+          store={props.store}
+          currentSessionId={sessionId()}
+          focused={sidebarFocused}
+          onBlur={() => setSidebarFocused(false)}
+          {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
+        />
       </box>
-      <Prompt store={props.store} onSubmit={props.onSubmit} onOpenPalette={() => setPaletteOpen(true)} />
+      <Prompt
+        store={props.store}
+        onSubmit={props.onSubmit}
+        onOpenPalette={() => setPaletteOpen(true)}
+        shouldFocus={shouldFocusPrompt}
+      />
       <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
-        <text fg={CHROME.textMuted}> mode: {modeName()} · session: {props.currentSessionId} </text>
-        <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+P palette · /help commands </text>
+        <text fg={CHROME.textMuted}> mode: {modeName()} · session: {sessionId()} </text>
+        <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+S sessions · Ctrl+P palette </text>
       </box>
       <CommandPalette
         open={paletteOpen()}
@@ -147,9 +178,10 @@ export function App(props: AppProps): JSX.Element {
 export function createAppRoot(
   store: TuiStore,
   onSubmit: (text: string) => void,
-  currentSessionId: string,
+  currentSessionId: string | (() => string),
   commands: readonly CommandEntry[],
   onCycleMode?: () => void,
+  onSelectSession?: (id: string) => void,
 ): () => JSX.Element {
   return () => (
     <App
@@ -158,6 +190,7 @@ export function createAppRoot(
       currentSessionId={currentSessionId}
       commands={commands}
       {...onCycleMode === undefined ? {} : { onCycleMode }}
+      {...onSelectSession === undefined ? {} : { onSelectSession }}
     />
   )
 }
