@@ -26,7 +26,6 @@ import { createMemo, createSignal, type Accessor } from 'solid-js'
 import type { TextareaRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
 import type { TuiStore } from '../store.js'
-
 /** Props for {@link Prompt}. */
 export interface PromptProps {
   /** The store exposing `pendingQuestion()` for answer-mode routing. */
@@ -35,6 +34,10 @@ export interface PromptProps {
   onSubmit: (text: string) => void
   /** Fired when the user requests the command palette (Ctrl-P). */
   onOpenPalette?: () => void
+  /** Fired when the user presses Tab to cycle the work mode (runner rebuilds). */
+  onCycleMode?: () => void
+  /** Hero layout (home page): no top border, centered by the parent `<Home>`. */
+  hero?: boolean
 }
 
 /**
@@ -44,6 +47,7 @@ export interface PromptProps {
  * the placeholder reads `task> ` (or `plan> ` in plan mode) and the submitted
  * line fires {@link PromptProps.onSubmit}. A colored `❯` prefix sits left of
  * the input; its color tracks the mode (cyan task, magenta plan, yellow answer).
+ * The `hero` prop drops the top border for the centered home layout.
  * @param props - the prompt props.
  * @returns the JSX element for the prompt input.
  */
@@ -62,6 +66,7 @@ export function Prompt(props: PromptProps): JSX.Element {
     recordHistory(value)
     props.onSubmit(value)
   }
+
 
   const [inputEl, setInputEl] = createSignal<TextareaRenderable | undefined>(undefined)
   // Track the live content via onContentChange so submit can read the current
@@ -126,7 +131,11 @@ export function Prompt(props: PromptProps): JSX.Element {
   })
 
   return (
-    <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingTop={0} paddingBottom={0}>
+    <box
+      {...(props.hero === true
+        ? {}
+        : { border: ['top'] as const, borderStyle: 'single' as const, borderColor: CHROME.border, paddingTop: 0, paddingBottom: 0 })}
+    >
       {banner()}
       <box paddingLeft={1} flexDirection="row">
         <text fg={prefixColor()}><b>❯ </b></text>
@@ -138,6 +147,13 @@ export function Prompt(props: PromptProps): JSX.Element {
           placeholder={placeholder()}
           onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
           onKeyDown={(key: KeyEvent) => {
+            // Tab cycles the work mode (the runner rebuilds the agent); the
+            // textarea would otherwise insert a literal Tab, so prevent it.
+            if (key.name === 'tab' && props.onCycleMode !== undefined) {
+              props.onCycleMode()
+              key.preventDefault()
+              return
+            }
             if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
               // Ctrl-P with no history → open the command palette instead.
               if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {

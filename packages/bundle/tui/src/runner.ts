@@ -30,8 +30,17 @@ import { dryRunCapture } from './capture.ts'
 import { createTuiStore, type TuiStore, type SessionListItem } from './view/store.js'
 import { createTuiRenderer, renderApp } from './view/renderer.js'
 import { theme, themeNames, switchTheme } from './view/theme.js'
+import { nextWorkMode, type WorkMode } from './view/modes.js'
 import type { CommandEntry } from './view/components/command-palette.js'
 import type { JSX } from '@opentui/solid'
+
+/** The valid work-mode preset ids accepted by `/mode`. */
+const WORK_MODE_IDS: readonly string[] = ['standard', 'code', 'minimal', 'cordis']
+
+/** Whether `value` is a valid work-mode id (for `/mode` validation). */
+function isWorkMode(value: string): boolean {
+  return WORK_MODE_IDS.includes(value)
+}
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
 const NAME = 'dsh-tui'
@@ -331,16 +340,36 @@ export async function runTui(): Promise<void> {
         onSubmit: (text: string) => void,
         currentSessionId: string,
         commands: readonly CommandEntry[],
+        onCycleMode?: () => void,
       ) => () => JSX.Element
     }
     const onSubmit = (text: string): void => {
       const trimmed = text.trim()
       if (trimmed === '') return
+      // First submission flips the home hero to the chat layout. The store
+      // owns the page signal; the view's `<App>` memo reads it and swaps.
+      if (store.page() === 'home') store.setPage('chat')
       // Built-in REPL commands: exit/quit end the loop cleanly (exit 0) instead
       // of being sent to the agent as a task line.
       const cmd = trimmed.toLowerCase()
       if (cmd === 'exit' || cmd === 'quit' || cmd === '/exit' || cmd === '/quit') {
         void disposeAndExitWithRenderer(0)
+        return
+      }
+      // /mode <name>: swap the active work mode (preset id) in the store. The
+      // view reads `store.mode()` immediately; the agent rebuild on the new
+      // preset is a Stage-D concern (the TUI bundle does not yet mount
+      // agent-presets). Until then `/mode` is display-only + acknowledged.
+      if (cmd.startsWith('/mode')) {
+        const arg = trimmed.slice('/mode'.length).trim()
+        if (arg === '') {
+          process.stdout.write(`mode: ${store.mode()} (active)\n`)
+        } else if (isWorkMode(arg)) {
+          store.setMode(arg as WorkMode)
+          process.stdout.write(`mode: ${arg}\n`)
+        } else {
+          process.stdout.write(`unknown mode: ${arg}; available: standard, code, minimal, cordis\n`)
+        }
         return
       }
       // /theme <name>: swap the active color theme at runtime. No agent round-trip.
@@ -399,14 +428,20 @@ export async function runTui(): Promise<void> {
         void refreshSessions()
       })
     }
+    // Tab cycles the work mode in the store (display-only until the agent
+    // rebuild lands in Stage D). The view reads `store.mode()` and re-renders.
+    const onCycleMode = (): void => {
+      store.setMode(nextWorkMode(store.mode()))
+    }
     // Build the command palette entries (model/session/theme commands). The
     // palette is opened via Ctrl-P from the prompt.
     const commands: CommandEntry[] = [
       { label: 'Switch model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
       { label: 'Switch theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
+      { label: 'Switch mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
       { label: 'Refresh sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
     ]
-    await renderApp(createAppRoot(store, onSubmit, agent.session.id, commands), renderer)
+    await renderApp(createAppRoot(store, onSubmit, agent.session.id, commands, onCycleMode), renderer)
     // renderApp() resolves after mounting + renderer.start(); it does NOT
     // block. The renderer's frame loop + stdin key dispatch run on Bun's
     // event loop, but the runner's control flow would fall through to the

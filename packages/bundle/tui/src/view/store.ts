@@ -21,6 +21,7 @@ import type {
 } from '@deepseek-ai/dsh-session'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools/presentation'
 import type { TransportEvent } from '../transport/event-source.js'
+import type { WorkMode } from './modes.js'
 
 /**
  * The pending/completed state of one tool invocation in the transcript.
@@ -115,6 +116,10 @@ export interface TuiStore {
   readonly model: () => ModelSelection
   /** Session list for the sidebar (live + cold, updated on refresh). */
   readonly sessions: () => readonly SessionListItem[]
+  /** The active surface page: `home` (centered hero) or `chat`. */
+  readonly page: () => 'home' | 'chat'
+  /** The active work mode (preset id) for the status bar and Tab cycling. */
+  readonly mode: () => WorkMode
   /**
    * The underlying Solid `createStore` proxy. Components that need
    * fine-grained reactivity (e.g. `<For each={store.state.messages}>`) read
@@ -151,6 +156,21 @@ export interface TuiStore {
    */
   setSessions(sessions: readonly SessionListItem[]): void
   /**
+   * Set the active surface page. Called by the runner on the first submission
+   * to flip from the centered home hero to the chat layout.
+   * @param page - the page to switch to.
+   * @returns void; updates the page signal synchronously.
+   */
+  setPage(page: 'home' | 'chat'): void
+  /**
+   * Set the active work mode (preset id). Called by the runner on `/mode` or
+   * by the view on Tab. The runner owns the agent rebuild; the store only
+   * carries the display value.
+   * @param mode - the work mode id.
+   * @returns void; updates the mode signal synchronously.
+   */
+  setMode(mode: WorkMode): void
+  /**
    * Push a pending question into the store and await its answer. The `<Prompt>`
    * component routes a submitted line to resolve the returned promise when a
    * question is pending. This is the v1 answer to the OpenTUI raw-mode vs
@@ -184,6 +204,10 @@ export interface StoreState {
   todos: TodoItem[]
   planActive: boolean
   status: string
+  /** Which surface page is active: `home` before the first submission, `chat` after. */
+  page: 'home' | 'chat'
+  /** The active work mode (preset id); Tab cycles it. `standard` is the default. */
+  mode: WorkMode
 }
 
 /**
@@ -206,6 +230,8 @@ export function createTuiStore(): TuiStore {
     todos: [],
     planActive: false,
     status: 'idle',
+    page: 'home',
+    mode: 'standard',
   })
 
   let queue: TransportEvent[] = []
@@ -216,6 +242,8 @@ export function createTuiStore(): TuiStore {
   let pendingResolver: ((answer: string) => void) | undefined
   const [model, setModel] = createSignal<ModelSelection>({ provider: '', model: '' })
   const [sessions, setSessions] = createSignal<SessionListItem[]>([])
+  const [page, setPage] = createSignal<'home' | 'chat'>('home')
+  const [mode, setMode] = createSignal<WorkMode>('standard')
 
   const flush = (): void => {
     if (queue.length === 0) return
@@ -274,6 +302,8 @@ export function createTuiStore(): TuiStore {
     get status(): string { return state.status },
     model: () => model(),
     sessions: () => sessions(),
+    page: () => page(),
+    mode: () => mode(),
     /**
      * The Solid store proxy. Components that need fine-grained reactivity
      * (e.g. `<For each={store.state.messages}>`) read the proxy directly so
@@ -288,6 +318,8 @@ export function createTuiStore(): TuiStore {
     setStatus,
     setModel,
     setSessions,
+    setPage,
+    setMode,
     awaitAnswer,
     pendingQuestion,
     resolveAnswer,

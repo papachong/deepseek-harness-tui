@@ -15,18 +15,20 @@
 import { type JSX } from '@opentui/solid'
 import { createMemo } from 'solid-js'
 import { CHROME, STATUS_COLORS } from '../theme.js'
+import { workMode } from '../modes.js'
 import type { MessageEntry, TuiStore } from '../store.js'
 
 /** Props for {@link StatusBar}. */
 export interface StatusBarProps {
-  /** The store exposing `status` and `messages` (for token totals). */
+  /** The store exposing `status`, `messages`, `mode`, and `model` for display. */
   store: TuiStore
 }
 
 /**
- * Render the status bar: left = product name + model status indicator; right =
- * cumulative token usage across all assistant messages. The status dot is green
- * when idle, yellow when running.
+ * Render the status bar: left = product name + work mode + status indicator;
+ * right = cumulative token usage across all assistant messages. The status dot
+ * is green when idle, yellow when running. The work mode name (标准/PTC/极简/
+ * 创造) sits beside the product so Tab cycling is visible immediately.
  * @param props - the status-bar props.
  * @returns the JSX element for the status bar.
  */
@@ -34,6 +36,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
   const status = createMemo(() => props.store.state.status)
   const isRunning = createMemo(() => status() === 'running')
   const dotColor = createMemo(() => isRunning() ? STATUS_COLORS.pending : STATUS_COLORS.completed)
+  const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
   const totals = createMemo(() => {
     let inputTokens = 0
     let outputTokens = 0
@@ -59,7 +62,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
       <box flexDirection="row">
         <text fg={dotColor()}>● </text>
         <text fg={CHROME.text}><b>dsh</b></text>
-        <text fg={CHROME.textMuted}> · deepseek</text>
+        <text fg={CHROME.textMuted}> · {modeName()}</text>
         <text fg={CHROME.textMuted}>  {status()}</text>
       </box>
       <box flexGrow={1} />

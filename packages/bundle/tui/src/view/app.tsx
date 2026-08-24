@@ -15,6 +15,7 @@
 
 import { type JSX } from '@opentui/solid'
 import { For, createMemo, createSignal } from 'solid-js'
+import { CHROME } from './theme.js'
 import type { TuiStore, MessageEntry, ToolEntry } from './store.js'
 import { Message } from './components/message.js'
 import { ToolCard } from './components/tool-card.js'
@@ -23,6 +24,8 @@ import { Prompt } from './components/prompt.js'
 import { StatusBar } from './components/status-bar.js'
 import { Sidebar } from './components/sidebar.js'
 import { CommandPalette } from './components/command-palette.js'
+import { Home } from './components/home.js'
+import { workMode } from './modes.js'
 import type { CommandEntry } from './components/command-palette.js'
 
 /** One merged transcript item: either a message or a tool card. */
@@ -40,6 +43,8 @@ export interface AppProps {
   currentSessionId: string
   /** Available commands for the command palette (populated by runner). */
   commands: readonly CommandEntry[]
+  /** Fired when the user cycles the work mode with Tab (runner rebuilds agent). */
+  onCycleMode?: () => void
 }
 
 /**
@@ -78,10 +83,23 @@ export function App(props: AppProps): JSX.Element {
   )
   const todosBlock = createMemo(() => <Todos todos={props.store.state.todos} />)
   const [paletteOpen, setPaletteOpen] = createSignal(false)
-  // Wire a global keybind: Ctrl-P (when not in textarea) toggles the palette.
-  // The textarea owns ↑/↓ for history; the palette is opened via /command or
-  // a key the runner registers. For now the runner passes commands and the
-  // palette opens on a signal the prompt can set.
+  const page = createMemo(() => props.store.state.page)
+  const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
+  // Home page: centered banner + hero prompt. The first submission flips the
+  // store page to 'chat' in the runner's onSubmit, which swaps this branch out.
+  const home = createMemo<JSX.Element>(() => {
+    if (page() !== 'home') return undefined
+    return (
+      <Home
+        store={props.store}
+        onSubmit={props.onSubmit}
+        {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
+      />
+    )
+  })
+  const homeEl = home()
+  if (homeEl !== undefined) return homeEl
+  // Chat layout: status bar + transcript + sidebar + prompt + bottom info area.
   return (
     <box flexDirection="column" height="100%">
       <StatusBar store={props.store} />
@@ -102,6 +120,10 @@ export function App(props: AppProps): JSX.Element {
         <Sidebar store={props.store} currentSessionId={props.currentSessionId} />
       </box>
       <Prompt store={props.store} onSubmit={props.onSubmit} onOpenPalette={() => setPaletteOpen(true)} />
+      <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
+        <text fg={CHROME.textMuted}> mode: {modeName()} · session: {props.currentSessionId} </text>
+        <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+P palette · /help commands </text>
+      </box>
       <CommandPalette
         open={paletteOpen()}
         onClose={() => setPaletteOpen(false)}
@@ -127,6 +149,15 @@ export function createAppRoot(
   onSubmit: (text: string) => void,
   currentSessionId: string,
   commands: readonly CommandEntry[],
+  onCycleMode?: () => void,
 ): () => JSX.Element {
-  return () => <App store={store} onSubmit={onSubmit} currentSessionId={currentSessionId} commands={commands} />
+  return () => (
+    <App
+      store={store}
+      onSubmit={onSubmit}
+      currentSessionId={currentSessionId}
+      commands={commands}
+      {...onCycleMode === undefined ? {} : { onCycleMode }}
+    />
+  )
 }
