@@ -249,8 +249,13 @@ export function createTuiStore(): TuiStore {
   let pendingResolver: ((answer: string) => void) | undefined
   const [model, setModel] = createSignal<ModelSelection>({ provider: '', model: '' })
   const [sessions, setSessions] = createSignal<SessionListItem[]>([])
-  const [page, setPage] = createSignal<'home' | 'chat'>('home')
-  const [mode, setMode] = createSignal<WorkMode>('standard')
+  // page and mode are stored on the Solid store proxy (not signals) so
+  // components that read `store.state.page` / `store.state.mode` in a
+  // tracking scope re-render when the runner sets them. A separate signal
+  // would be disconnected from the proxy — setting it would not update the
+  // proxy, and reading the proxy would not track the signal.
+  const setPage = (page: 'home' | 'chat'): void => { setState('page', page) }
+  const setMode = (mode: WorkMode): void => { setState('mode', mode) }
 
   const flush = (): void => {
     if (queue.length === 0) return
@@ -319,8 +324,8 @@ export function createTuiStore(): TuiStore {
     get status(): string { return state.status },
     model: () => model(),
     sessions: () => sessions(),
-    page: () => page(),
-    mode: () => mode(),
+    page: () => state.page,
+    mode: () => state.mode,
     /**
      * The Solid store proxy. Components that need fine-grained reactivity
      * (e.g. `<For each={store.state.messages}>`) read the proxy directly so
