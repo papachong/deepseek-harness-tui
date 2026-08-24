@@ -21,6 +21,8 @@
     { "path": "../../core/tools" },
     { "path": "../../llm/llm" },
     { "path": "../../core/session" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../../session/session-title" },
     { "path": "../../interaction/user-approval" },
     { "path": "../../interaction/user-questions" },
     { "path": "../../runtime-diagnostics/invariants" }

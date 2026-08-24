@@ -10,20 +10,27 @@
 import { existsSync } from 'node:fs'
 import { boot, installFailLoud, loadEnv, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
-import { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type ModelSelectionRef, type ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+// Type-only imports that bring Context augmentations (ctx.llm,
+// ctx.sessionPersistence) into this program's type graph, mirroring
+// api-proxy.ts:31's pattern for ctx.tools.
+import type {} from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { ToolEventView } from './transport/event-source.js'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
-import { createTuiStore, type TuiStore } from './view/store.js'
+import { createTuiStore, type TuiStore, type SessionListItem } from './view/store.js'
 import { createTuiRenderer, renderApp } from './view/renderer.js'
 import { theme, themeNames, switchTheme } from './view/theme.js'
+import type { CommandEntry } from './view/components/command-palette.js'
 import type { JSX } from '@opentui/solid'
 
 /* v8 ignore start -- composition over tested app-boot/agent/session and executable acceptance paths */
@@ -189,17 +196,26 @@ export async function runTui(): Promise<void> {
   const agents = ctx.get('agents')
   const defaultModel = ctx.get('agentDefaultModel')
   const sessions = ctx.get('sessions')
+  const llm = ctx.get('llm')
+  const sessionPersistence = ctx.get('sessionPersistence')
   if (agents === undefined || defaultModel === undefined || sessions === undefined) {
     throw new Error(`${NAME}: config must mount agent-spine + agent-default-model + sessions`)
   }
+  // The store is created before the agent so session/model state can be seeded
+  // and the sidebar refresh helper can close over it.
+  const store = createTuiStore()
 
   const selection = defaultModel.currentSelection()
+  // Retain the ModelSelectionRef so a command-palette model swap can mutate
+  // `selectionRef.current` in place (model-selection.ts: the next step reads it).
+  // The setup closure below closes over this same ref.
+  const selectionRef: ModelSelectionRef = { current: selection, assembled: undefined }
+  store.setModel(selection)
 
   // Create or resume one agent. --resume loads a persisted cold session and
   // rebuilds the agent on it (mirror api-proxy.ts:1626); absent → fresh session.
   const setup = (agentCtx: Context) => {
-    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
-    installModelSelection(agentCtx, selected)
+    installModelSelection(agentCtx, selectionRef)
   }
   const { agent } = resumeSessionId === undefined
     ? await agents.create({
@@ -221,7 +237,39 @@ export async function runTui(): Promise<void> {
   // OpenTUI <markdown streaming> does its own folding (per the design-confirm
   // key decision #1, SKIP BlockAssembler for the markdown path), so events are
   // pushed straight into the reactive store.
-  const store = createTuiStore()
+  // Sidebar session list: merge live sessions (sessions.list()) + cold
+  // (sessionPersistence.list()) and fold titles via foldSessionTitle (pure
+  // function, no service needed for live sessions). Refreshed on boot and
+  // after each turn (whenIdle). The session-title plugin (mounted via
+  // cordis.yml) feeds foldSessionTitle for live sessions; cold sessions use
+  // a fallback id title (reading their events is deferred).
+  const refreshSessions = async (): Promise<void> => {
+    const items: SessionListItem[] = []
+    const live = sessions.list()
+    const liveIds = new Set<string>()
+    for (const session of live) {
+      liveIds.add(session.id)
+      const title = foldSessionTitle(session.events)?.title ?? session.id
+      const lastEvent = session.events[session.events.length - 1]
+      const updatedAt = lastEvent?.time ?? session.header.createdAt
+      items.push({ id: session.id, title, live: true, updatedAt })
+    }
+    if (sessionPersistence !== undefined) {
+      try {
+        const cold = await sessionPersistence.list()
+        for (const header of cold) {
+          if (liveIds.has(header.id)) continue
+          items.push({ id: header.id, title: header.id, live: false, updatedAt: header.createdAt })
+        }
+      } catch {
+        // persistence.list may reject when the store is empty/uninitialized;
+        // the live list still renders.
+      }
+    }
+    items.sort((a, b) => b.updatedAt - a.updatedAt)
+    store.setSessions(items)
+  }
+  void refreshSessions()
   // Tool registry: compute host-side render intent (callView/resultView) via
   // presentCall/presentResult, mirroring api-proxy.ts:689-725 viewFor. The
   // agent is a ScopeKey (agent-loop/src/agent.ts:94), so passing it scopes the
@@ -277,8 +325,13 @@ export async function runTui(): Promise<void> {
     // JSX (tsdown cannot bundle Solid JSX), so it cannot be a static import.
     // The `as` cast sidesteps tsc's --jsx-not-set resolution of the .tsx source;
     // the module is type-checked separately by tsconfig.view.json.
-    const { createAppRoot } = await import('./view/app.js') as {
-      createAppRoot: (store: TuiStore, onSubmit: (text: string) => void) => () => JSX.Element
+    const { createAppRoot } = await import('./view/app.js') as unknown as {
+      createAppRoot: (
+        store: TuiStore,
+        onSubmit: (text: string) => void,
+        currentSessionId: string,
+        commands: readonly CommandEntry[],
+      ) => () => JSX.Element
     }
     const onSubmit = (text: string): void => {
       const trimmed = text.trim()
@@ -302,6 +355,39 @@ export async function runTui(): Promise<void> {
         }
         return
       }
+      // /model <provider>/<model>: swap the model selection in place. The
+      // ModelSelectionRef mutates; the next step picks it up (model-selection.ts).
+      // No agent rebuild. /model with no arg lists available models async.
+      if (cmd.startsWith('/model')) {
+        const arg = trimmed.slice('/model'.length).trim()
+        if (arg === '') {
+          // List models asynchronously (the llm service is async).
+          const llmService = llm
+          if (llmService !== undefined) {
+            void Promise.all(llmService.listProviders().map(async (p) => {
+              const models = await llmService.listModels(p.id)
+              return `${p.name}: ${models.map(m => m.id).join(', ')}`
+            })).then((lines) => {
+              process.stdout.write(`models:\n${lines.join('\n')}\n(active: ${selectionRef.current?.provider}/${selectionRef.current?.model})\n`)
+            })
+          } else {
+            process.stdout.write(`llm service not mounted; active: ${selectionRef.current?.provider}/${selectionRef.current?.model}\n`)
+          }
+        } else {
+          const slash = arg.indexOf('/')
+          const current = selectionRef.current
+          const provider = slash === -1 ? (current?.provider ?? arg) : arg.slice(0, slash)
+          const model = slash === -1 ? arg : arg.slice(slash + 1)
+          const next: ModelSelection = { provider, model }
+          selectionRef.current = next
+          store.setModel(next)
+          void defaultModel.saveSelection(next)
+          process.stdout.write(`model: ${provider}/${model}\n`)
+        }
+        return
+      }
+      // /sessions: refresh the sidebar session list.
+      if (cmd === '/sessions') { void refreshSessions(); return }
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: trimmed }],
         source: { kind: 'user' },
@@ -310,9 +396,17 @@ export async function runTui(): Promise<void> {
       // one-shot; a REPL benefits from per-turn persistence).
       void agent.whenIdle().then(() => {
         void sessions.flush(agent.session)
+        void refreshSessions()
       })
     }
-    await renderApp(createAppRoot(store, onSubmit), renderer)
+    // Build the command palette entries (model/session/theme commands). The
+    // palette is opened via Ctrl-P from the prompt.
+    const commands: CommandEntry[] = [
+      { label: 'Switch model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
+      { label: 'Switch theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
+      { label: 'Refresh sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
+    ]
+    await renderApp(createAppRoot(store, onSubmit, agent.session.id, commands), renderer)
     // renderApp() resolves after mounting + renderer.start(); it does NOT
     // block. The renderer's frame loop + stdin key dispatch run on Bun's
     // event loop, but the runner's control flow would fall through to the

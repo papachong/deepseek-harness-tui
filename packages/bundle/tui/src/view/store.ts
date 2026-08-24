@@ -14,6 +14,7 @@
 import { batch, createSignal } from 'solid-js'
 import { createStore, produce, type SetStoreFunction } from 'solid-js/store'
 import type { CallId, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
   SessionEventMap,
   TodoItem,
@@ -82,6 +83,20 @@ export interface MessageEntry {
 }
 
 /**
+ * One sidebar session row: title + liveness + id.
+ */
+export interface SessionListItem {
+  /** The session id. */
+  id: string
+  /** Display title (folded from events or a fallback). */
+  title: string
+  /** True when the session is live (in-process attached). */
+  live: boolean
+  /** Epoch ms of last activity (createdAt or latest event time). */
+  updatedAt: number
+}
+
+/**
  * Reactive view-model surface the OpenTUI components read. All fields are
  * reactive signals or stores; reads inside a Solid tracking scope subscribe.
  */
@@ -96,6 +111,10 @@ export interface TuiStore {
   readonly planActive: boolean
   /** Latest agent status string (e.g. `idle`, `running`). */
   readonly status: string
+  /** Current model selection (provider + model), for the status bar and command palette. */
+  readonly model: () => ModelSelection
+  /** Session list for the sidebar (live + cold, updated on refresh). */
+  readonly sessions: () => readonly SessionListItem[]
   /**
    * The underlying Solid `createStore` proxy. Components that need
    * fine-grained reactivity (e.g. `<For each={store.state.messages}>`) read
@@ -119,6 +138,18 @@ export interface TuiStore {
    * @returns void; updates the status signal synchronously.
    */
   setStatus(status: string): void
+  /**
+   * Set the current model selection (from a command-palette swap).
+   * @param model - the new provider+model selection.
+   * @returns void; updates the model signal synchronously.
+   */
+  setModel(model: ModelSelection): void
+  /**
+   * Replace the sidebar session list (from a sidebar/command-palette refresh).
+   * @param sessions - the session list items.
+   * @returns void; updates the sessions signal synchronously.
+   */
+  setSessions(sessions: readonly SessionListItem[]): void
   /**
    * Push a pending question into the store and await its answer. The `<Prompt>`
    * component routes a submitted line to resolve the returned promise when a
@@ -164,9 +195,9 @@ const FLUSH_WINDOW_MS = 16
 /**
  * Create a reactive TUI store. The store queues incoming transport events and
  * applies them in a `batch()` within a 16ms coalescing window, mirroring
- * opencode's `sdk.tsx` flush pattern. Status updates and pending-answer
- * routing bypass the queue (status is synchronous; answers resolve promises).
- * @returns a {@link TuiStore} with reactive reads and `push`/`setStatus`/`awaitAnswer` write paths.
+ * opencode's `sdk.tsx` flush pattern. Status, model, and session-list updates
+ * bypass the queue (synchronous); answers resolve promises.
+ * @returns a {@link TuiStore} with reactive reads and `push`/`setStatus`/`setModel`/`setSessions`/`awaitAnswer` write paths.
  */
 export function createTuiStore(): TuiStore {
   const [state, setState] = createStore<StoreState>({
@@ -183,6 +214,8 @@ export function createTuiStore(): TuiStore {
 
   const [pendingQuestion, setPendingQuestion] = createSignal<string | undefined>(undefined)
   let pendingResolver: ((answer: string) => void) | undefined
+  const [model, setModel] = createSignal<ModelSelection>({ provider: '', model: '' })
+  const [sessions, setSessions] = createSignal<SessionListItem[]>([])
 
   const flush = (): void => {
     if (queue.length === 0) return
@@ -239,6 +272,8 @@ export function createTuiStore(): TuiStore {
     get todos(): readonly TodoItem[] { return state.todos },
     get planActive(): boolean { return state.planActive },
     get status(): string { return state.status },
+    model: () => model(),
+    sessions: () => sessions(),
     /**
      * The Solid store proxy. Components that need fine-grained reactivity
      * (e.g. `<For each={store.state.messages}>`) read the proxy directly so
@@ -251,6 +286,8 @@ export function createTuiStore(): TuiStore {
     state,
     push,
     setStatus,
+    setModel,
+    setSessions,
     awaitAnswer,
     pendingQuestion,
     resolveAnswer,

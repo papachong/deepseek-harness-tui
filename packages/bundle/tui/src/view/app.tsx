@@ -14,13 +14,16 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { For, createMemo } from 'solid-js'
+import { For, createMemo, createSignal } from 'solid-js'
 import type { TuiStore, MessageEntry, ToolEntry } from './store.js'
 import { Message } from './components/message.js'
 import { ToolCard } from './components/tool-card.js'
 import { Plan, Todos } from './components/projections.js'
 import { Prompt } from './components/prompt.js'
 import { StatusBar } from './components/status-bar.js'
+import { Sidebar } from './components/sidebar.js'
+import { CommandPalette } from './components/command-palette.js'
+import type { CommandEntry } from './components/command-palette.js'
 
 /** One merged transcript item: either a message or a tool card. */
 type TranscriptItem =
@@ -33,6 +36,10 @@ export interface AppProps {
   store: TuiStore
   /** Fired when the user submits a task line (no pending question). */
   onSubmit: (text: string) => void
+  /** The current session id (for sidebar highlight). */
+  currentSessionId: string
+  /** Available commands for the command palette (populated by runner). */
+  commands: readonly CommandEntry[]
 }
 
 /**
@@ -70,23 +77,36 @@ export function App(props: AppProps): JSX.Element {
     mergeTranscript(props.store.state.messages, props.store.state.tools),
   )
   const todosBlock = createMemo(() => <Todos todos={props.store.state.todos} />)
+  const [paletteOpen, setPaletteOpen] = createSignal(false)
+  // Wire a global keybind: Ctrl-P (when not in textarea) toggles the palette.
+  // The textarea owns ↑/↓ for history; the palette is opened via /command or
+  // a key the runner registers. For now the runner passes commands and the
+  // palette opens on a signal the prompt can set.
   return (
     <box flexDirection="column" height="100%">
       <StatusBar store={props.store} />
-      <box flexGrow={1} minHeight={3}>
-        <scrollbox stickyScroll stickyStart="bottom">
-          <For each={transcript()}>
-            {(item: TranscriptItem) =>
-              item.kind === 'message'
-                ? <Message entry={item.entry} />
-                : <ToolCard tool={item.entry} />
-            }
-          </For>
-          {todosBlock()}
-          <Plan active={props.store.state.planActive} />
-        </scrollbox>
+      <box flexDirection="row" flexGrow={1} minHeight={3}>
+        <box flexGrow={1}>
+          <scrollbox stickyScroll stickyStart="bottom">
+            <For each={transcript()}>
+              {(item: TranscriptItem) =>
+                item.kind === 'message'
+                  ? <Message entry={item.entry} />
+                  : <ToolCard tool={item.entry} />
+              }
+            </For>
+            {todosBlock()}
+            <Plan active={props.store.state.planActive} />
+          </scrollbox>
+        </box>
+        <Sidebar store={props.store} currentSessionId={props.currentSessionId} />
       </box>
-      <Prompt store={props.store} onSubmit={props.onSubmit} />
+      <Prompt store={props.store} onSubmit={props.onSubmit} onOpenPalette={() => setPaletteOpen(true)} />
+      <CommandPalette
+        open={paletteOpen()}
+        onClose={() => setPaletteOpen(false)}
+        commands={props.commands}
+      />
     </box>
   )
 }
@@ -102,6 +122,11 @@ export function App(props: AppProps): JSX.Element {
  * @param onSubmit - fired when the user submits a task line.
  * @returns a root factory returning the app JSX element.
  */
-export function createAppRoot(store: TuiStore, onSubmit: (text: string) => void): () => JSX.Element {
-  return () => <App store={store} onSubmit={onSubmit} />
+export function createAppRoot(
+  store: TuiStore,
+  onSubmit: (text: string) => void,
+  currentSessionId: string,
+  commands: readonly CommandEntry[],
+): () => JSX.Element {
+  return () => <App store={store} onSubmit={onSubmit} currentSessionId={currentSessionId} commands={commands} />
 }

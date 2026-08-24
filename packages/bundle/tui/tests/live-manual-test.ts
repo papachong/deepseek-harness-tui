@@ -2,8 +2,8 @@ import { resolve } from 'node:path'
 import { runTuiPtySmoke } from './pty-harness.ts'
 async function main(): Promise<void> {
   const out = await runTuiPtySmoke({
-    label: 'theme-test',
-    tempDirPrefix: 'dsh-tui-theme-',
+    label: 'p2-sidebar-cmd-test',
+    tempDirPrefix: 'dsh-tui-p2-',
     binPath: resolve(import.meta.dirname, '..', 'lib', 'bin.js'),
     configPath: resolve(import.meta.dirname, '..', 'cordis.yml'),
     columns: 100, rows: 30, timeoutMs: 35_000,

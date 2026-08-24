@@ -33,6 +33,8 @@ export interface PromptProps {
   store: TuiStore
   /** Fired with the submitted line when no pending question is active (REPL task). */
   onSubmit: (text: string) => void
+  /** Fired when the user requests the command palette (Ctrl-P). */
+  onOpenPalette?: () => void
 }
 
 /**
@@ -137,6 +139,12 @@ export function Prompt(props: PromptProps): JSX.Element {
           onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
           onKeyDown={(key: KeyEvent) => {
             if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
+              // Ctrl-P with no history → open the command palette instead.
+              if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {
+                props.onOpenPalette()
+                key.preventDefault()
+                return
+              }
               navigateHistory('up')
               key.preventDefault()
             } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
