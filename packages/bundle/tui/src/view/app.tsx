@@ -110,65 +110,67 @@ export function App(props: AppProps): JSX.Element {
   const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
   // Home page: centered banner + hero prompt. The first submission flips the
   // store page to 'chat' in the runner's onSubmit, which swaps this branch out.
-  const home = createMemo<JSX.Element>(() => {
-    if (page() !== 'home') return undefined
-    return (
-      <Home
-        store={props.store}
-        onSubmit={props.onSubmit}
-        {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
-        {...props.commands === undefined ? {} : { commands: props.commands }}
-        {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
-      />
-    )
-  })
-  const homeEl = home()
-  if (homeEl !== undefined) return homeEl
-  // Chat layout: status bar + transcript + sidebar + prompt + bottom info area.
-  return (
-    <box flexDirection="column" height="100%">
-      <StatusBar store={props.store} />
-      <box flexDirection="row" flexGrow={1} minHeight={3}>
-        <box flexGrow={1}>
-          <scrollbox stickyScroll stickyStart="bottom">
-            <For each={transcript()}>
-              {(item: TranscriptItem) =>
-                item.kind === 'message'
-                  ? <Message entry={item.entry} />
-                  : <ToolCard tool={item.entry} />
-              }
-            </For>
-            {todosBlock()}
-            <Plan active={props.store.state.planActive} />
-          </scrollbox>
-        </box>
-        <Sidebar
+  // Rendered as a memo read inside the returned JSX (NOT an early return) so
+  // Solid tracks the `page()` dependency and swaps layouts reactively.
+  const layout = createMemo<JSX.Element>(() => {
+    if (page() === 'home') {
+      return (
+        <Home
           store={props.store}
-          currentSessionId={sessionId()}
-          focused={sidebarFocused}
-          onBlur={() => setSidebarFocused(false)}
-          {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
+          onSubmit={props.onSubmit}
+          {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
+          {...props.commands === undefined ? {} : { commands: props.commands }}
+          {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
+        />
+      )
+    }
+    // Chat layout: status bar + transcript + sidebar + prompt + bottom info area.
+    return (
+      <box flexDirection="column" height="100%">
+        <StatusBar store={props.store} />
+        <box flexDirection="row" flexGrow={1} minHeight={3}>
+          <box flexGrow={1}>
+            <scrollbox stickyScroll stickyStart="bottom">
+              <For each={transcript()}>
+                {(item: TranscriptItem) =>
+                  item.kind === 'message'
+                    ? <Message entry={item.entry} />
+                    : <ToolCard tool={item.entry} />
+                }
+              </For>
+              {todosBlock()}
+              <Plan active={props.store.state.planActive} />
+            </scrollbox>
+          </box>
+          <Sidebar
+            store={props.store}
+            currentSessionId={sessionId()}
+            focused={sidebarFocused}
+            onBlur={() => setSidebarFocused(false)}
+            {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
+          />
+        </box>
+        <Prompt
+          store={props.store}
+          onSubmit={props.onSubmit}
+          onOpenPalette={() => setPaletteOpen(true)}
+          shouldFocus={shouldFocusPrompt}
+          commands={props.commands}
+          {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
+        />
+        <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
+          <text fg={CHROME.textMuted}> mode: {modeName()} · session: {sessionId()} </text>
+          <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+S sessions · Ctrl+P palette </text>
+        </box>
+        <CommandPalette
+          open={paletteOpen()}
+          onClose={() => setPaletteOpen(false)}
+          commands={props.commands}
         />
       </box>
-      <Prompt
-        store={props.store}
-        onSubmit={props.onSubmit}
-        onOpenPalette={() => setPaletteOpen(true)}
-        shouldFocus={shouldFocusPrompt}
-        commands={props.commands}
-        {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
-      />
-      <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
-        <text fg={CHROME.textMuted}> mode: {modeName()} · session: {sessionId()} </text>
-        <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+S sessions · Ctrl+P palette </text>
-      </box>
-      <CommandPalette
-        open={paletteOpen()}
-        onClose={() => setPaletteOpen(false)}
-        commands={props.commands}
-      />
-    </box>
-  )
+    )
+  })
+  return layout()
 }
 
 /**
