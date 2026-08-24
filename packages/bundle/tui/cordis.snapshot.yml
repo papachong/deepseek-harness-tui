@@ -3,6 +3,9 @@
 # key or network. The replay provider catalog claims the deepseek-official
 # route so agentDefaultModel.currentSelection() resolves to a registered
 # adapter. llm-replay reads DSH_SNAPSHOT_FILE from env at apply time.
+# The command plugins (command-compact/feedback/goal) call the live LLM for
+# summaries/telemetry, so they are disabled under replay; the command
+# registry itself stays mounted so `ctx.commands.list` still resolves.
 # Mirrors packages/examples/tui-demo/cordis.snapshot.yml.
 
 - id: base
@@ -15,6 +18,18 @@
         disabled: true
       - id: llm
         name: '@deepseek-ai/dsh-llm'
+        disabled: true
+      - id: compaction
+        name: '@deepseek-ai/dsh-compaction-basic'
+        disabled: true
+      - id: command-compact
+        name: '@deepseek-ai/dsh-command-compact'
+        disabled: true
+      - id: command-feedback
+        name: '@deepseek-ai/dsh-command-feedback'
+        disabled: true
+      - id: command-goal
+        name: '@deepseek-ai/dsh-command-goal'
         disabled: true
       - insert:
           - id: llm-replay

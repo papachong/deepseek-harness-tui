@@ -20,11 +20,21 @@
     { "path": "../../core/agent-default-model" },
     { "path": "../../core/tools" },
     { "path": "../../llm/llm" },
+    { "path": "../../llm/token-meter" },
     { "path": "../../core/session" },
     { "path": "../../session/session-persistence" },
     { "path": "../../session/session-title" },
+    { "path": "../../interaction/commands" },
     { "path": "../../interaction/user-approval" },
     { "path": "../../interaction/user-questions" },
+    { "path": "../../compaction/compaction-basic" },
+    { "path": "../../compaction/compaction-tool-result-pruner" },
+    { "path": "../../compaction/command-compact" },
+    { "path": "../../feedback/command-feedback" },
+    { "path": "../../goal/goal" },
+    { "path": "../../goal/goal-round-driver" },
+    { "path": "../../goal/command-goal" },
+    { "path": "../../plan/plan-mode" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

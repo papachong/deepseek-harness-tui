@@ -20,6 +20,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 // api-proxy.ts:31's pattern for ctx.tools.
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-commands'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
@@ -207,6 +208,7 @@ export async function runTui(): Promise<void> {
   const sessions = ctx.get('sessions')
   const llm = ctx.get('llm')
   const sessionPersistence = ctx.get('sessionPersistence')
+  const commands = ctx.get('commands')
   if (agents === undefined || defaultModel === undefined || sessions === undefined) {
     throw new Error(`${NAME}: config must mount agent-spine + agent-default-model + sessions`)
   }
@@ -426,6 +428,34 @@ export async function runTui(): Promise<void> {
       }
       // /sessions: refresh the sidebar session list.
       if (cmd === '/sessions') { void refreshSessions(); return }
+      // Registered slash commands (/compact /feedback /goal /permission /plan
+      // and any other plugin-registered command): hand the raw line to the
+      // command registry, which parses, runs the handler, and logs the
+      // command/run + command/done lifecycle events. The runner stays the
+      // authority for TUI-local commands (exit/theme/model/mode/sessions)
+      // because they own the renderer or the store, not the agent session.
+      // `commands` is optional: a composition without dsh-commands mounted
+      // falls through to agent.followup (the `/cmd` text reaches the model).
+      if (commands !== undefined && cmd.startsWith('/')) {
+        const controller = new AbortController()
+        void commands.execute(agent, trimmed, [], controller.signal).then((result) => {
+          if (result === undefined) {
+            // No registered command matched; send to the agent as a task.
+            agent.followup(createUserMessage({
+              content: [{ type: 'text', text: trimmed }],
+              source: { kind: 'user' },
+            }))
+            return
+          }
+          if (result.result.kind === 'error') {
+            process.stderr.write(`${result.result.text ?? 'command error'}\n`)
+          } else if (result.result.text !== undefined && result.result.text !== '') {
+            process.stdout.write(`${result.result.text}\n`)
+          }
+          void refreshSessions()
+        })
+        return
+      }
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: trimmed }],
         source: { kind: 'user' },
@@ -492,20 +522,41 @@ export async function runTui(): Promise<void> {
         process.stderr.write(`${NAME}: session switch failed: ${error instanceof Error ? error.message : String(error)}\n`)
       }
     }
-    // Build the command palette entries (model/session/theme commands). The
-    // palette is opened via Ctrl-P from the prompt.
-    const commands: CommandEntry[] = [
+    // Build the command palette. The TUI-local entries (model/theme/mode/
+    // sessions) own the renderer or store; the rest come from the command
+    // registry (`ctx.commands.list(agent)` → /compact /feedback /goal
+    // /permission /plan) so every registered command is palette-reachable.
+    // The registry is optional: a composition without dsh-commands mounted
+    // shows only the TUI-local entries.
+    const localCommands: CommandEntry[] = [
       { label: 'Switch model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
       { label: 'Switch theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
       { label: 'Switch mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
       { label: 'Refresh sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
     ]
+    const registryCommands: CommandEntry[] = commands === undefined ? [] : commands.list(agent).map(d => ({
+      label: `/${d.name}`,
+      description: d.description,
+      run: () => {
+        const controller = new AbortController()
+        void commands.execute(agent, `/${d.name}`, [], controller.signal).then((result) => {
+          if (result === undefined) return
+          if (result.result.kind === 'error') {
+            process.stderr.write(`${result.result.text ?? 'command error'}\n`)
+          } else if (result.result.text !== undefined && result.result.text !== '') {
+            process.stdout.write(`${result.result.text}\n`)
+          }
+          void refreshSessions()
+        })
+      },
+    }))
+    const paletteEntries = [...localCommands, ...registryCommands]
     await renderApp(
       createAppRoot(
         store,
         onSubmit,
         () => agent.session.id,
-        commands,
+        paletteEntries,
         onCycleMode,
         (id: string) => { void onSelectSession(id) },
       ),

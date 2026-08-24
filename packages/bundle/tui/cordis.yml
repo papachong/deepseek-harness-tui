@@ -59,6 +59,53 @@
       enableRunInBackground: false
     toolJobs: false
 
+# ── slash-command surface ───────────────────────────────────────────────
+# The command registry + the plugins that register `/compact`, `/feedback`,
+# `/goal`, `/plan` with it. The runner's onSubmit hands any `/cmd` it does
+# not own (theme/model/mode/sessions/exit) to `ctx.commands.execute(agent,
+# line)` so one dispatch serves all of these. Each command plugin injects
+# ['commands', …]; the registry is the leaf consumer. The non-command
+# services these depend on (token-meter, compaction, goal, plan-mode) mount
+# beside them.
+#
+# `/permission` (dsh-permission-presets) is NOT mounted here: it requires a
+# confining `ctx.shell` executor (sandboxMode), and this bundle mounts the
+# unconfined `dsh-bash-local`. Adopting the sandbox stack (sandbox +
+# sandbox-policy + bash-sandbox) is a separate composition change deferred
+# to a later stage.
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+
+- id: compaction
+  name: '@deepseek-ai/dsh-compaction-basic'
+
+- id: compaction-tool-result-pruner
+  name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+
+- id: command-compact
+  name: '@deepseek-ai/dsh-command-compact'
+
+- id: command-feedback
+  name: '@deepseek-ai/dsh-command-feedback'
+
+- id: goal
+  name: '@deepseek-ai/dsh-goal'
+
+- id: goal-round-driver
+  name: '@deepseek-ai/dsh-goal-round-driver'
+
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: plan-mode
+  name: '@deepseek-ai/dsh-plan-mode'
+  config:
+    section: |
+      You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. Do not edit or write files, run formatters, commit, or otherwise carry out the plan. Explore first with non-mutating reads, searches, and checks. When ready, call exit_plan_mode with the complete plan markdown starting with a # title. If review rejects it, incorporate the feedback and present again.
+
 - id: sessions
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
