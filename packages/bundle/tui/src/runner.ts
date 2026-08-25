@@ -40,6 +40,7 @@ import { nextWorkMode, type WorkMode } from './view/modes.js'
 import type { CommandEntry } from './view/components/command-palette.js'
 import type { MentionEntry } from './view/components/mention-menu.js'
 import type { JSX } from '@opentui/solid'
+import type { CliRenderer } from '@opentui/core'
 
 /** The valid work-mode preset ids accepted by `/mode`. */
 const WORK_MODE_IDS: readonly string[] = ['standard', 'code', 'minimal', 'cordis']
@@ -191,6 +192,14 @@ export async function runTui(): Promise<void> {
   async function disposeAndExit(code: number): Promise<void> {
     if (exiting) return
     exiting = true
+    // Stop the renderer's frame loop + stdin dispatch BEFORE restoring the
+    // terminal. Without `stop()`, the renderer keeps writing cursor-position
+    // and rendering escape sequences to stdout even after the alt screen is
+    // left — the terminal interprets them as garbage text (e.g.
+    // "35;27;12M35;26;12M…"). `stop()` halts the frame loop and detaches
+    // the stdin raw-mode handler; `destroy()` is the full teardown. Both
+    // are safe to call even when the renderer is already stopped.
+    renderer?.stop()
     // Restore the terminal: OpenTUI's renderer entered alt screen and hid the
     // cursor; write the leave-alt-screen + show-cursor escape sequences.
     process.stdout.write('\x1b[?1049l\x1b[?25h')
@@ -389,11 +398,16 @@ export async function runTui(): Promise<void> {
     : registerUserQuestionProvider(ctx, { store })
 
   let exitCode = 0
+  // The renderer must be declared at this scope (not inside `try`) so the
+  // `disposeAndExit` closure can call `renderer?.stop()` to halt the frame
+  // loop before restoring the terminal — without it, the renderer keeps
+  // writing escape sequences to stdout (garbage after the alt screen exits).
+  let renderer: CliRenderer | undefined
   try {
     // Boot the OpenTUI renderer (async: queries terminal DSR over stdin).
     // The <Prompt> component owns the task input via onSubmit → agent.followup +
     // whenIdle + flush. The readline REPL loop is replaced by the OpenTUI input.
-    const renderer = await createTuiRenderer()
+    renderer = await createTuiRenderer()
     // Dynamic import: tsdown/rolldown leaves this unresolved, and Bun.build
     // (which produces lib/view/app.js) supplies it at runtime. The App module is
     // JSX (tsdown cannot bundle Solid JSX), so it cannot be a static import.
@@ -728,9 +742,12 @@ export async function runTui(): Promise<void> {
     // out-of-tree; it is NOT invoked until the user confirms (solution note
     // risk #4: any capture must not bypass ai-cli idempotence).
     dryRunCapture(agent.session)
-    // Restore the terminal: OpenTUI's renderer entered alt screen and hid the
-    // cursor; write the leave-alt-screen + show-cursor escape sequences so a
-    // non-disposing exit does not leave the terminal in raw mode.
+    // Stop the renderer BEFORE restoring the terminal. The renderer's frame
+    // loop writes cursor-position and rendering escape sequences to stdout;
+    // without stopping it first, the terminal receives garbage text after
+    // the alt screen exits (e.g. "35;27;12M35;26;12M…").
+    renderer?.stop()
+    // Restore the terminal: leave alt screen, show cursor.
     process.stdout.write('\x1b[?1049l\x1b[?25h')
     disposeEvent()
     disposeStatus()
