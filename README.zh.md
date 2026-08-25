@@ -1,80 +1,81 @@
-# DeepSeek Harness
+# DSH TUI
 
 [English](README.md) | 中文
 
-DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的终端界面——一个“一切皆插件”的 agent harness。DSH TUI 在进程内运行 agent 循环，并通过 OpenTUI（SolidJS）界面渲染：流式 markdown、按工具类型的卡片、主题与工作模式。
 
-它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。
+![DSH TUI 主页](patches/tui-screenshot-home.png)
 
-## 开发者预览
+特性：
 
-DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
+- 主页与对话页，支持流式 markdown 回复
+- 工具调用卡片：terminal、diff、read、search、web
+- 带自动补全菜单的斜杠命令：`/model`、`/mode`、`/theme`、`/sessions`、`/clear`、`/compact`、`/goal`、`/plan`
+- `@path` 文件提及与 `@[session]` 跨会话提及
+- 侧边栏会话列表，支持恢复、审批提示、33 套主题
+- Tab 循环切换的工作模式（standard / code / minimal / cordis），由 agent preset 驱动
+- `./.sessions` 下的 JSONL 会话持久化（用 `DSH_SESSION_ROOT` 覆盖）
 
-<a id="run"></a>
+## 下载发布包
 
-## 运行
+预构建的单文件二进制发布在 [GitHub Releases](https://github.com/papachong/deepseek-harness-tui/releases)——无需安装运行时，可执行文件已内嵌一切：
 
-### 通过 `npm` 运行
+| 平台 | 产物 |
+| --- | --- |
+| Windows x86-64 | `dsh-tui-windows-x64.exe` |
+| macOS Intel | `dsh-tui-macos-x64` |
+| macOS Apple Silicon (arm64) | `dsh-tui-macos-arm64` |
+| Linux x86-64 (Debian/Ubuntu, `.deb`) | `dsh-tui-linux-x64.deb` |
 
-安装 `Node.js`，然后运行：
+未来版本将提供一行在线安装命令。
+
+设置 [DeepSeek API key](https://platform.deepseek.com)，然后用一份组合配置运行二进制（从本仓库复制默认的 [`packages/bundle/tui/cordis.yml`](packages/bundle/tui/cordis.yml)）：
 
 ```sh
-npx @deepseek-ai/dsh web
+# macOS / Linux
+export DEEPSEEK_API_KEY=sk-...        # or put it in a .env next to your config
+chmod +x ./dsh-tui-macos-arm64
+./dsh-tui-macos-arm64 path/to/cordis.yml
+
+# Linux (.deb) installs dsh-tui onto PATH
+sudo dpkg -i dsh-tui-linux-x64.deb
+dsh-tui path/to/cordis.yml
 ```
 
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+```powershell
+# Windows (PowerShell)
+$env:DEEPSEEK_API_KEY = "sk-..."
+.\dsh-tui-windows-x64.exe path\to\cordis.yml
+```
 
-<a id="run-from-source"></a>
+二进制按以下非空优先级取组合配置：`$DSH_CORDIS_CONFIG`，其次位置参数。常用标志与环境变量：
 
-### 从源码运行
+- `--resume <sessionId>` — rebuild the agent on a persisted session
+- `DSH_SESSION_ROOT` — session storage root (default `./.sessions`)
+- `DSH_CWD` — working directory for bash and filesystem tools
 
-如需从仓库源码运行：
+## 从源码构建
+
+需要 Node.js ^22.19 或 >=24（构建工具）与 [Bun](https://bun.sh) 1.3+（编译 Solid 视图并运行结果——OpenTUI 渲染器通过 `bun:ffi` 绘制，Node.js 不支持）。
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
-pnpm dsh web
+git clone https://github.com/papachong/deepseek-harness-tui.git
+cd deepseek-harness-tui
+pnpm install          # needs Node.js ^22.19 or >=24, and Bun for the view build
+pnpm run build        # tsc + tsdown bundles; Bun.build compiles the Solid view
+cd packages/bundle/tui
+echo 'DEEPSEEK_API_KEY=sk-...' > .env
+bun lib/bin.js cordis.yml
 ```
 
-`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+要改界面，视图层位于 `packages/bundle/tui/src/view/`（SolidJS 组件、store、主题），REPL runner 在 `src/runner.ts`。用 `pnpm --filter @deepseek-ai/dsh-tui run build:view` 重建视图，再重新运行 `bun lib/bin.js`。
 
-## 社区与支持
-
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
-- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">企微小助手</th>
-      <th align="center">入群问卷</th>
-      <th align="center">微信公众号</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
+若想组合自己的 agent 而非改界面，写一份自己的 `cordis.yml`——挂载不同的插件、preset 或模型——并让二进制指向它。TUI 渲染组合所产出的一切。
 
 ## 参与贡献
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.zh.md)。
-
-## 开发
-
-请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
-
-面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
+欢迎在 [github.com/papachong/deepseek-harness-tui](https://github.com/papachong/deepseek-harness-tui) 提交 Issue 与 PR。推送前运行相关检查（`pnpm run typecheck`、`pnpm run lint`、聚焦的 `pnpm run test`）；仓库约定见 [AGENTS.md](AGENTS.md)。
 
 ## 许可证
 
 [MIT](LICENSE)
-
-第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

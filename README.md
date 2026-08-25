@@ -1,5 +1,7 @@
 # DSH TUI
 
+English | [中文](README.zh.md)
+
 A terminal UI for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), the plugin-based agent harness where everything is a plugin. DSH TUI runs the agent loop in-process and renders it with an OpenTUI (SolidJS) interface: streaming markdown, per-tool cards, themes, and work modes.
 
 ![DSH TUI home](patches/tui-screenshot-home.png)
