@@ -36,7 +36,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
   const status = createMemo(() => props.store.state.status)
   const isRunning = createMemo(() => status() === 'running')
   const dotColor = createMemo(() => isRunning() ? STATUS_COLORS.pending : STATUS_COLORS.completed)
-  const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
+  const modeName = createMemo(() => workMode(props.store.state.mode)?.name() ?? props.store.state.mode)
   const totals = createMemo(() => {
     let inputTokens = 0
     let outputTokens = 0

@@ -89,7 +89,7 @@ export function Prompt(props: PromptProps): JSX.Element {
   // model id render under the input so the hero and chat prompts both
   // surface the composition state without a separate status bar.
   const modeName = createMemo(() =>
-    workMode(props.store.state.mode)?.name ?? props.store.state.mode,
+    workMode(props.store.state.mode)?.name() ?? props.store.state.mode,
   )
   const modelLabel = createMemo(() => {
     const m = props.store.model()

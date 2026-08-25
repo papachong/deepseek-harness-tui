@@ -126,7 +126,7 @@ export function App(props: AppProps): JSX.Element {
   const sessionId = createMemo(() =>
     typeof props.currentSessionId === 'function' ? props.currentSessionId() : props.currentSessionId,
   )
-  const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
+  const modeName = createMemo(() => workMode(props.store.state.mode)?.name() ?? props.store.state.mode)
   const modelLabel = createMemo(() => {
     const m = props.store.model()
     return m.model === '' ? '' : m.model

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { t, setLocale, detectLocale, localeNames } from '../src/view/i18n.js'
 
-describe('i18n', () => {
+describe('i18n', async () => {
   beforeEach(() => {
     setLocale('en')
   })
@@ -57,6 +57,20 @@ describe('i18n', () => {
 
     it('checks LC_MESSAGES when LANG and LC_ALL are absent', () => {
       expect(detectLocale({ LC_MESSAGES: 'zh_CN.UTF-8' })).toBe('zh')
+    })
+  })
+
+  describe('localized mode names', () => {
+    it('returns the English mode name under en', async () => {
+      setLocale('en')
+      const { workMode } = await import('../src/view/modes.js') as typeof import('../src/view/modes.js')
+      expect(workMode('standard')?.name()).toBe('Standard')
+    })
+
+    it('returns the Chinese mode name under zh', async () => {
+      setLocale('zh')
+      const { workMode } = await import('../src/view/modes.js') as typeof import('../src/view/modes.js')
+      expect(workMode('standard')?.name()).toBe('标准模式')
     })
   })
 })

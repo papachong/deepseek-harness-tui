@@ -1,25 +1,28 @@
 /**
  * Work-mode definitions for the TUI's Tab-cycling surface. The four modes map
- * 1:1 to the shipped agent presets in `apps/cli/config/agent-presets/` — their
- * display names and descriptions are copied verbatim from each preset's
- * `preset.yml` so the TUI's labels match the Web UI's. The actual agent
- * composition swap happens in the runner (Stage D); this module owns only the
+ * 1:1 to the shipped agent presets in `apps/cli/config/agent-presets/`. The
+ * preset `id` is a stable machine identifier passed to `agentPresets.mount`;
+ * only the display `name`/`description` are localized via `t()` so they read
+ * from the active locale at render time, not at module load. The actual agent
+ * composition swap happens in the runner; this module owns only the
  * vocabulary + cycling order the view layer reads.
  *
  * @module @deepseek-ai/dsh-tui/view/modes
  */
 
+import { t } from './i18n.js'
+
 /** The preset id; joins the agent via `meta.preset` in the runner. */
 export type WorkMode = 'standard' | 'code' | 'minimal' | 'cordis'
 
-/** One work mode's display metadata, copied from `preset.yml`. */
+/** One work mode's display metadata. `name`/`description` translate lazily. */
 export interface WorkModeDef {
   /** The preset id (the value passed to the agent). */
   readonly id: WorkMode
-  /** Display name (Chinese, matches the Web UI). */
-  readonly name: string
-  /** One-line description (Chinese, matches the Web UI). */
-  readonly description: string
+  /** Resolves the display name for the active locale. */
+  readonly name: () => string
+  /** Resolves the one-line description for the active locale. */
+  readonly description: () => string
 }
 
 /**
@@ -29,23 +32,23 @@ export interface WorkModeDef {
 export const WORK_MODES: readonly WorkModeDef[] = [
   {
     id: 'standard',
-    name: '标准模式',
-    description: '功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。',
+    name: () => t('mode.standard.name'),
+    description: () => t('mode.standard.desc'),
   },
   {
     id: 'code',
-    name: 'PTC 模式',
-    description: '具备标准模式的全部能力，并通过 Code Mode SDK 呈现工具，让模型用一个 TypeScript 程序组合多步操作。',
+    name: () => t('mode.code.name'),
+    description: () => t('mode.code.desc'),
   },
   {
     id: 'minimal',
-    name: '极简模式',
-    description: '仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。',
+    name: () => t('mode.minimal.name'),
+    description: () => t('mode.minimal.desc'),
   },
   {
     id: 'cordis',
-    name: '创造模式',
-    description: '用于创建自定义 Agent preset：具备标准模式的全部能力，并提供运行时检查、插件实验和 preset 创作指导。',
+    name: () => t('mode.cordis.name'),
+    description: () => t('mode.cordis.desc'),
   },
 ]
 
