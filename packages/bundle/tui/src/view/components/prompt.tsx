@@ -270,7 +270,13 @@ export function Prompt(props: PromptProps): JSX.Element {
     )
   })
 
-  const menuOpen = createMemo(() => slashOpen() || mentionOpen())
+  // A menu is "open" when the slash or @-mention filter is active AND there
+  // are matching entries to display. An empty menu is not open: Enter/Esc
+  // should fall through to the normal submit/dismiss paths, not be consumed
+  // by a menu handler that has nothing to complete.
+  const menuOpen = createMemo(() =>
+    (slashOpen() || mentionOpen()) && menuItems().length > 0,
+  )
   // The menus render in sibling <box> elements whose onKeyDown cannot receive
   // key events from the focused textarea (OpenTUI does not bubble
   // preventDefault'd keys to parents). So the prompt owns the menu navigation
@@ -280,7 +286,13 @@ export function Prompt(props: PromptProps): JSX.Element {
   const menuItems = createMemo<readonly { label: string; insert: string }[]>(() => {
     if (slashOpen() && props.commands !== undefined) {
       const t = slashToken(liveValue())
-      const all = props.commands
+      // Only registry commands (label starts with `/`) belong in the slash
+      // menu. Local palette entries (Switch theme, Switch model, etc.) are
+      // NOT slash commands — they appear only in the Ctrl+P command palette.
+      // If a local entry's label were inserted as the menu completion, it
+      // would replace the typed `/cmd` with e.g. "Switch theme " which the
+      // runner's onSubmit cannot match, making every slash command a no-op.
+      const all = props.commands.filter(c => c.label.startsWith('/'))
       const matches = t === '' ? all : all.filter(c => c.label.toLowerCase().includes(t))
       return (matches.length > 8 ? matches.slice(0, 8) : matches).map(c => ({ label: c.label, insert: `${c.label} ` }))
     }

@@ -19,7 +19,7 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createSignal } from 'solid-js'
+import { createMemo, createSignal } from 'solid-js'
 import { ROLE_COLORS, CHROME, buildSyntaxStyle } from '../theme.js'
 import { Spinner } from './spinner.js'
 import type { MessageEntry } from '../store.js'
@@ -59,45 +59,33 @@ export interface MessageProps {
  * @returns the JSX element for the message.
  */
 export function Message(props: MessageProps): JSX.Element {
-  // The assistant TextPart path needs no reactive root: every field it reads
-  // (`text`, `streaming`, `reasoning`, `usage`, timestamps) is a leaf on the
-  // store proxy that the parent `<For>` re-supplies on change. Computing the
-  // JSX inline (not inside `createMemo`) keeps every read inside Solid's
-  // tracking scope — a memo that returns JSX closes over the first evaluation
-  // and never re-tracks the inner `<markdown content>` accessor.
   const isUser = props.entry.role === 'user'
-  const showMarkdown = props.entry.text !== '' || !props.entry.streaming
-  const showReasoning = props.entry.reasoning !== undefined && props.entry.reasoning !== ''
-  const showUsage = props.entry.usage !== undefined
-  const showInterrupted = props.entry.interrupted === true
   const borderColor = ROLE_COLORS[props.entry.role]
+  const showMarkdown = createMemo(() => props.entry.text !== '' || !props.entry.streaming)
+  const showReasoning = createMemo(() => props.entry.reasoning !== undefined && props.entry.reasoning !== '')
+  const showUsage = createMemo(() => props.entry.usage !== undefined)
+  const showInterrupted = createMemo(() => props.entry.interrupted === true)
   // Reasoning collapse: default collapsed (one-line header); expandable to show
   // the full thought chain. A signal per message instance; OpenTUI has no click
   // on <text>, so the toggle is driven by a key the runner could later wire to
   // a keymap (e.g. Tab on the focused reasoning header). For now the header
   // shows the toggle glyph and the state stays collapsed until expanded.
   const [reasoningExpanded] = createSignal(false)
-  const durationMs = ((): number | undefined => {
+  // Step duration: finishedAt - startedAt (epoch ms). Undefined while
+  // streaming or before both timestamps land.
+  const durationMs = createMemo(() => {
     const start = props.entry.startedAt
     const end = props.entry.finishedAt
     return start !== undefined && end !== undefined ? end - start : undefined
-  })()
+  })
 
-  const reasoningBlock = (): JSX.Element => {
-    if (!showReasoning) return undefined
+  const reasoningBlock = createMemo<JSX.Element>(() => {
+    if (!showReasoning()) return undefined
     const glyph = reasoningExpanded() ? '▼' : '▶'
     return (
       <box marginBottom={1}>
         <box flexDirection="row">
           <text fg={CHROME.textMuted}><i>{glyph} thought</i></text>
-          {/*
-            The streaming spinner renders as a sibling of the header text,
-            NOT a child of <text>: OpenTUI's <text> only accepts string /
-            TextNodeRenderable / StyledText children, and a component child
-            there throws "TextNodeRenderable only accepts strings…" at
-            insert time (the same rule applies to the streaming caret and
-            the meta line below).
-          */}
           {props.entry.streaming ? <Spinner fg={CHROME.textMuted} /> : undefined}
         </box>
         {reasoningExpanded()
@@ -105,10 +93,10 @@ export function Message(props: MessageProps): JSX.Element {
           : undefined}
       </box>
     )
-  }
+  })
 
-  const body = (): JSX.Element => {
-    if (!showMarkdown) {
+  const body = createMemo<JSX.Element>(() => {
+    if (!showMarkdown()) {
       return (
         <box flexDirection="row">
           <Spinner fg={CHROME.textMuted} />
@@ -129,7 +117,7 @@ export function Message(props: MessageProps): JSX.Element {
         {props.entry.streaming ? <text fg={borderColor}>▋</text> : undefined}
       </box>
     )
-  }
+  })
 
   // Assistant meta line (opencode AssistantMessage:1549-1573): `▣ · tokens ·
   // duration` rendered after the last part once the step completes or is
@@ -137,20 +125,20 @@ export function Message(props: MessageProps): JSX.Element {
   // child inside <text> crashes the OpenTUI reconciler ("TextNodeRenderable
   // only accepts strings…") because the spread `style` prop resolves to an
   // object child.
-  const meta = (): JSX.Element => {
-    if (props.entry.streaming && !showInterrupted) return undefined
-    if (!showUsage && !showInterrupted && durationMs === undefined) return undefined
+  const meta = createMemo<JSX.Element>(() => {
+    if (props.entry.streaming && !showInterrupted()) return undefined
+    if (!showUsage() && !showInterrupted() && durationMs() === undefined) return undefined
     const usage = props.entry.usage
     return (
       <box marginTop={1} flexDirection="row">
-        <text fg={showInterrupted ? CHROME.textMuted : borderColor}>▣ </text>
-        {showUsage && usage ? <text fg={CHROME.textMuted}>↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
+        <text fg={showInterrupted() ? CHROME.textMuted : borderColor}>▣ </text>
+        {showUsage() && usage ? <text fg={CHROME.textMuted}>↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
         {usage?.cacheReadTokens ? <text fg={CHROME.textMuted}> · ⤒{usage.cacheReadTokens}</text> : undefined}
-        {durationMs !== undefined ? <text fg={CHROME.textMuted}> · {formatDuration(durationMs)}</text> : undefined}
-        {showInterrupted ? <text fg={CHROME.textMuted}> · interrupted</text> : undefined}
+        {durationMs() !== undefined ? <text fg={CHROME.textMuted}> · {formatDuration(durationMs() ?? 0)}</text> : undefined}
+        {showInterrupted() ? <text fg={CHROME.textMuted}> · interrupted</text> : undefined}
       </box>
     )
-  }
+  })
 
   // User message: padded panel with a left `┃` rule and the panel background
   // (opencode's UserMessage:1397-1420). No prefix glyph; the border color
