@@ -27,8 +27,9 @@ export interface StatusBarProps {
 /**
  * Render the status bar: left = product name + work mode + status indicator;
  * right = cumulative token usage across all assistant messages. The status dot
- * is green when idle, yellow when running. The work mode name (标准/PTC/极简/
- * 创造) sits beside the product so Tab cycling is visible immediately.
+ * is green when idle, yellow when running. The work mode name (localized via
+ * `t()`, so it follows the active locale) sits beside the product so Tab
+ * cycling is visible immediately.
  * @param props - the status-bar props.
  * @returns the JSX element for the status bar.
  */
