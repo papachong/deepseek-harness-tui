@@ -22,6 +22,7 @@ import { type JSX, useTerminalDimensions } from '@opentui/solid'
 import { createMemo } from 'solid-js'
 import { CHROME } from '../theme.js'
 import { workMode } from '../modes.js'
+import { t } from '../i18n.js'
 import { Logo } from '../logo.js'
 import type { TuiStore } from '../store.js'
 import { Prompt } from './prompt.js'
@@ -134,7 +135,7 @@ export function Home(props: HomeProps): JSX.Element {
         <box flexDirection="row" gap={2}>
           <text fg={CHROME.textMuted}>{modeDef()?.name() ?? 'standard'}</text>
           {modelLabel() === '' ? undefined : <text fg={CHROME.textMuted}>{modelLabel()}</text>}
-          <text fg={CHROME.textMuted}>tab cycle · ctrl+p palette · /help</text>
+          <text fg={CHROME.textMuted}>{t('home.footer')}</text>
         </box>
       </box>
     </box>

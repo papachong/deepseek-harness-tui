@@ -25,6 +25,7 @@ import { Sidebar } from './components/sidebar.js'
 import { CommandPalette } from './components/command-palette.js'
 import { Home } from './components/home.js'
 import { workMode } from './modes.js'
+import { t } from './i18n.js'
 import type { CommandEntry } from './components/command-palette.js'
 import type { MentionEntry } from './components/mention-menu.js'
 
@@ -205,7 +206,7 @@ export function App(props: AppProps): JSX.Element {
             <text fg={CHROME.textMuted} flexShrink={0}>{status()}</text>
             <text fg={CHROME.textMuted} flexShrink={0}>{modeName()}</text>
             {modelLabel() === '' ? undefined : <text fg={CHROME.textMuted} flexShrink={0}>{modelLabel()}</text>}
-            <text fg={CHROME.textMuted} flexShrink={0}>ctrl+s sessions · ctrl+p palette · tab mode</text>
+            <text fg={CHROME.textMuted} flexShrink={0}>{t('chat.footer')}</text>
           </box>
         </box>
         <CommandPalette
