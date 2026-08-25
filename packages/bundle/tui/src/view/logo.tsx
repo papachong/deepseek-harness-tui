@@ -7,9 +7,9 @@
  * the right half bold — the two-tone split from the opencode home screen.
  *
  * DSH (left):  D  █▀▀▄  S  █▀▀▀  H  █  █
- *              D  █__█  S  █___  H  █__█
+ *              D  █__█  S  _^^█  H  █^^█
  *              D  ▀▀▀▀  S  ▀▀▀▀  H  ▀  ▀
- * TUI (right): T  ▀▀█▀▀  U  █  █  I  █
+ * TUI (right): T  ▀▀█▀▀  U  █  █  I  ▄ (row 0 dot)
  *              T    █    U  █  █  I  █
  *              T    █    U  █__█  I  █
  *              T    ▀    U  ▀▀▀▀  I  ▀
@@ -25,20 +25,20 @@ import { CHROME, tint } from './theme.js'
  * The DSH TUI wordmark. `left` and `right` pair row-for-row (left[i] renders
  * next to right[i] with a 1-column gap). Markup legend: `_` = background-
  * shade space, `^` = foreground upper half block (▀), `~`/`,` = shadow half
- * blocks. The leading row of spaces on `right` aligns the T under the DSH
- * baseline so the two halves read as one word.
+ * blocks. The leading row on `right` has a `▄` glyph aligning over the `I`
+ * to serve as its tittle (dot), matching opencode's ascender on `d`.
  */
 export const DSH_LOGO: { readonly left: readonly string[]; readonly right: readonly string[] } = {
   left: [
-    '                   ',
+    '              ',
     '█▀▀▄ █▀▀▀ █  █',
-    '█__█ █___ █__█',
+    '█__█ _^^█ █^^█',
     '▀▀▀▀ ▀▀▀▀ ▀  ▀',
   ],
   right: [
-    '             ▄     ',
+    '           ▄',
     '▀▀█▀▀ █  █ █',
-    '  █   █  █ █',
+    '  █   █__█ █',
     '  ▀   ▀▀▀▀ ▀',
   ],
 }

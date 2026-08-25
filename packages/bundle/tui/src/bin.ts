@@ -22,6 +22,18 @@ if (typeof process.loadEnvFile !== 'function') {
   process.loadEnvFile = () => {}
 }
 
-import { runTui } from './runner.ts'
+// The package-local bunfig.toml is only discovered when Bun starts from this
+// directory. Load the preloader here before the runner imports Solid so a
+// workspace-root invocation still gets the reactive Solid runtime.
+const SOLID_PRELOAD = '@opentui/solid/preload'
 
-void runTui()
+async function start(): Promise<void> {
+  await import(SOLID_PRELOAD)
+  const { runTui } = await import('./runner.ts')
+
+  void runTui()
+}
+
+void start()
+
+export {}

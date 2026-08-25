@@ -21,9 +21,9 @@
  * @module @deepseek-ai/dsh-tui/view/components/prompt
  */
 
-import { type JSX } from '@opentui/solid'
+import { type JSX, useKeyboard } from '@opentui/solid'
 import { createMemo, createSignal, createEffect, onCleanup, type Accessor } from 'solid-js'
-import type { TextareaRenderable, KeyEvent } from '@opentui/core'
+import type { InputRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, STATUS_COLORS } from '../theme.js'
 import { workMode } from '../modes.js'
 import type { TuiStore } from '../store.js'
@@ -86,9 +86,11 @@ export function Prompt(props: PromptProps): JSX.Element {
     isAnswer() ? 'answer> ' : isPlan() ? 'plan> ' : 'task> ',
   ) as Accessor<string>
   // Meta row (opencode prompt:1451-1465): the active work-mode name and the
-  // model id render under the textarea so the hero and chat prompts both
+  // model id render under the input so the hero and chat prompts both
   // surface the composition state without a separate status bar.
-  const modeName = createMemo(() => workMode(props.store.mode())?.name ?? props.store.mode())
+  const modeName = createMemo(() =>
+    workMode(props.store.state.mode)?.name ?? props.store.state.mode,
+  )
   const modelLabel = createMemo(() => {
     const m = props.store.model()
     return m.model === '' ? '' : m.model
@@ -97,18 +99,22 @@ export function Prompt(props: PromptProps): JSX.Element {
   const handleSubmit = (value: string): void => {
     if (props.store.resolveAnswer(value)) return
     recordHistory(value)
+    // Clear the input BEFORE firing the callback: the runner's onSubmit is
+    // async (agent.followup + whenIdle), and if the input retains the text
+    // the user sees a stale prompt while the model thinks.
+    setLiveValue('')
+    inputEl()?.editBuffer.setText('')
     props.onSubmit(value)
   }
 
-  const [inputEl, setInputEl] = createSignal<TextareaRenderable | undefined>(undefined)
+  const [inputEl, setInputEl] = createSignal<InputRenderable | undefined>(undefined)
   // When the app hands focus back to the prompt (e.g. after sidebar nav),
-  // call `.focus()` on the textarea. OpenTUI has no focusManager, so the app
+  // call `.focus()` on the input. OpenTUI has no focusManager, so the app
   // owns the region toggle and signals it via `shouldFocus`.
   createEffect(() => {
     if (props.shouldFocus?.() === true) inputEl()?.focus()
   })
-  // Track the live content via onContentChange so submit can read the current
-  // value without reaching into the textarea's internal edit buffer.
+  // Track the live content through the input event for autocomplete and history.
   const [liveValue, setLiveValue] = createSignal('')
   // Session-scoped input history: ↑/↓ navigates previously submitted lines.
   // Stored in a signal array local to this Prompt instance (one per process,
@@ -170,9 +176,8 @@ export function Prompt(props: PromptProps): JSX.Element {
 
   // Slash-command autocomplete: when the live value starts with `/`, render the
   // `<SlashMenu>` above the input. The menu reads `liveValue` + `commands` to
-  // filter; `↑`/`↓` move, `Enter` completes (replaces the prompt's content
-  // with `/name `), `Esc` closes. The textarea forwards `↑`/`↓`/`Enter`/`Esc`
-  // to the menu when it is open so focus never leaves the input.
+  // filter; the prompt's global keyboard handler moves the selection with
+  // `↑`/`↓`, and Enter completes a partial command while full commands submit.
   // Slash menu is open when the value starts with `/` AND the token after it
   // has no space (i.e. the user is still typing the command name). Once the
   // command is completed (ends with ` `), the menu closes so Enter submits.
@@ -271,17 +276,13 @@ export function Prompt(props: PromptProps): JSX.Element {
   })
 
   // A menu is "open" when the slash or @-mention filter is active AND there
-  // are matching entries to display. An empty menu is not open: Enter/Esc
-  // should fall through to the normal submit/dismiss paths, not be consumed
-  // by a menu handler that has nothing to complete.
+  // are matching entries to display. An empty menu is not open, so its
+  // navigation handler never consumes unrelated keyboard input.
   const menuOpen = createMemo(() =>
     (slashOpen() || mentionOpen()) && menuItems().length > 0,
   )
-  // The menus render in sibling <box> elements whose onKeyDown cannot receive
-  // key events from the focused textarea (OpenTUI does not bubble
-  // preventDefault'd keys to parents). So the prompt owns the menu navigation
-  // state and forwards ↑/↓/Enter/Esc here, dispatching to the active menu's
-  // complete callback.
+  // The menus render in sibling <box> elements, so the prompt owns their
+  // selection state and handles navigation through `useKeyboard`.
   const [menuIndex, setMenuIndex] = createSignal(0)
   const menuItems = createMemo<readonly { label: string; insert: string }[]>(() => {
     if (slashOpen() && props.commands !== undefined) {
@@ -313,17 +314,61 @@ export function Prompt(props: PromptProps): JSX.Element {
     const len = menuItems().length
     setMenuIndex(prev => prev >= len ? Math.max(0, len - 1) : prev)
   })
-  const menuComplete = (): void => {
-    const items = menuItems()
-    const entry = items[menuIndex()]
-    if (entry === undefined) return
+  const completeMenu = (): boolean => {
+    const entry = menuItems()[menuIndex()]
+    if (entry === undefined || (mentionOpen() && mentionActive())) return false
     if (slashOpen()) {
       completeSlash(entry.insert)
     } else {
       completeMention(entry.insert)
     }
     setMenuIndex(0)
+    return true
   }
+  const dismissMenu = (): void => {
+    if (slashOpen()) {
+      const stripped = liveValue().replace(/^\s*\//, '')
+      inputEl()?.editBuffer.setText(stripped)
+      setLiveValue(stripped)
+    }
+    setMentionEntries([])
+    setMenuIndex(0)
+  }
+  const handleEnter = (value: string): void => {
+    const selected = menuItems()[menuIndex()]
+    const isExactSlashCommand = slashOpen() && selected?.label === value.trim()
+    if (menuOpen() && !isExactSlashCommand && completeMenu()) return
+    handleSubmit(value)
+  }
+  useKeyboard((key: KeyEvent) => {
+    if (key.defaultPrevented) return
+    if (key.name === 'tab' && props.onCycleMode !== undefined) {
+      props.onCycleMode()
+      key.preventDefault()
+      return
+    }
+    if (menuOpen() && key.name === 'escape') {
+      dismissMenu()
+      key.preventDefault()
+      return
+    }
+    if (menuOpen() && (key.name === 'up' || key.name === 'down')) {
+      menuMove(key.name === 'up' ? -1 : 1)
+      key.preventDefault()
+      return
+    }
+    if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
+      if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {
+        props.onOpenPalette()
+      } else {
+        navigateHistory('up')
+      }
+      key.preventDefault()
+    } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
+      navigateHistory('down')
+      key.preventDefault()
+    }
+  })
 
   return (
     <box width="100%">
@@ -353,80 +398,13 @@ export function Prompt(props: PromptProps): JSX.Element {
           width="100%"
         >
           <box flexDirection="row">
-            <textarea
-              ref={(el: TextareaRenderable) => { setInputEl(el) }}
+            <input
+              ref={(el: InputRenderable) => { setInputEl(el) }}
               focused
               width="100%"
-              minHeight={1}
-              maxHeight={6}
               placeholder={placeholder()}
-              onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
-              onKeyDown={(key: KeyEvent) => {
-                // Tab cycles the work mode (the runner rebuilds the agent); the
-                // textarea would otherwise insert a literal Tab, so prevent it.
-                if (key.name === 'tab' && props.onCycleMode !== undefined) {
-                  props.onCycleMode()
-                  key.preventDefault()
-                  return
-                }
-                // When a menu is open, it owns ↑/↓/Enter/Esc. The menus' onKeyDown
-                // is on parent <box> elements, but OpenTUI delivers key events to
-                // the focused textarea first; if the textarea's onKeyDown calls
-                // preventDefault, the event does NOT bubble to the parent. So the
-                // menu must complete/submit HERE (not rely on bubbling), and then
-                // preventDefault to stop the native newline/submit.
-                if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'kpenter' || key.name === 'escape')) {
-                  key.preventDefault()
-                  if (key.name === 'up') { menuMove(-1); return }
-                  if (key.name === 'down') { menuMove(1); return }
-                  if (key.name === 'escape') {
-                    if (slashOpen()) {
-                      const stripped = liveValue().replace(/^\s*\//, '')
-                      setLiveValue(stripped)
-                      if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
-                    }
-                    setMentionEntries([])
-                    return
-                  }
-                  // Enter: complete the selected menu item.
-                  menuComplete()
-                  return
-                }
-                // Bare Enter (no modifiers) submits the input. OpenTUI's
-                // TextareaRenderable binds bare `return` to `newline` (not
-                // `submit`), so without this interception Enter inserts a newline.
-                // opencode overrides this via @opentui/keymap's managed textarea
-                // layer; dsh-tui does not use that layer, so intercept here:
-                // bare Enter → handleSubmit + preventDefault. Shift/Ctrl/Alt+Enter
-                // inserts a newline.
-                if ((key.name === 'return' || key.name === 'enter' || key.name === 'kpenter')
-                  && !key.shift && !key.ctrl && !key.meta) {
-                  handleSubmit(liveValue())
-                  key.preventDefault()
-                  return
-                }
-                if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
-                  // Ctrl-P with no history → open the command palette instead.
-                  if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {
-                    props.onOpenPalette()
-                    key.preventDefault()
-                    return
-                  }
-                  navigateHistory('up')
-                  key.preventDefault()
-                } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
-                  navigateHistory('down')
-                  key.preventDefault()
-                }
-              }}
-              onSubmit={() => {
-                // Fallback: the native TextareaRenderable fires onSubmit on
-                // meta+return / linefeed. The bare-Enter path in onKeyDown
-                // handles the common case; this covers the modifier-bound submit
-                // the textarea still owns.
-                const value = liveValue()
-                handleSubmit(value)
-              }}
+              onInput={(value: string) => { setLiveValue(value); historyCursor = null }}
+              on:enter={handleEnter}
             />
           </box>
           {/* Meta row: mode + model, mirroring opencode's prompt footer. */}

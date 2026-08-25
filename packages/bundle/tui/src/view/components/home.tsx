@@ -60,7 +60,7 @@ export interface HomeProps {
  * @returns the JSX element for the home page.
  */
 export function Home(props: HomeProps): JSX.Element {
-  const modeDef = createMemo(() => workMode(props.store.mode()))
+  const modeDef = createMemo(() => workMode(props.store.state.mode))
   const dimensions = useTerminalDimensions()
   // opencode's prompt max_width: configured value, or auto = max(75, 70% of
   // the terminal width). A narrower column keeps the input visually centered
@@ -82,9 +82,10 @@ export function Home(props: HomeProps): JSX.Element {
           <Logo />
         </box>
         <box height={1} minHeight={0} flexShrink={1} />
-        {/* Active work-mode tagline so Tab cycling is legible pre-session. */}
-        <box flexShrink={0}>
-          <text fg={CHROME.textMuted}> {modeDef()?.name ?? ''} — {modeDef()?.description ?? ''} </text>
+        {/* Active work-mode tagline and badge so Tab cycling is legible pre-session. */}
+        <box flexShrink={0} flexDirection="row" gap={1} alignItems="center">
+          <text fg={CHROME.borderActive} attributes={1}>[{modeDef()?.name ?? 'standard'}]</text>
+          <text fg={CHROME.textMuted}>{modeDef()?.description ?? ''}</text>
         </box>
         <box height={1} minHeight={0} flexShrink={1} />
         {/* Hero prompt: full width of the centered column, capped at
@@ -99,11 +100,36 @@ export function Home(props: HomeProps): JSX.Element {
             {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
           />
         </box>
+        {/* Quick action shortcuts matching opencode's home tips bar. */}
+        <box width="100%" maxWidth={promptMaxWidth()} alignItems="center" paddingTop={2} flexShrink={1}>
+          <box flexDirection="row" gap={2} justifyContent="center">
+            <box flexDirection="row" gap={1}>
+              <text fg={CHROME.borderActive} bg={CHROME.bgElement}> Tab </text>
+              <text fg={CHROME.textMuted}>mode</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={CHROME.borderActive} bg={CHROME.bgElement}> Ctrl+P </text>
+              <text fg={CHROME.textMuted}>palette</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={CHROME.borderActive} bg={CHROME.bgElement}> Ctrl+S </text>
+              <text fg={CHROME.textMuted}>sessions</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={CHROME.borderActive} bg={CHROME.bgElement}> / </text>
+              <text fg={CHROME.textMuted}>commands</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={CHROME.borderActive} bg={CHROME.bgElement}> @ </text>
+              <text fg={CHROME.textMuted}>mention</text>
+            </box>
+          </box>
+        </box>
         <box flexGrow={1} minHeight={0} />
       </box>
       {/* Footer bar: cwd on the left, mode + model + shortcuts on the right,
           matching opencode's session footer split layout. */}
-      <box width="100%" flexShrink={0} flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2} paddingBottom={1}>
+      <box width="100%" flexShrink={0} flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2} paddingBottom={1} paddingTop={1}>
         <text fg={CHROME.textMuted}>{process.cwd()}</text>
         <box flexDirection="row" gap={2}>
           <text fg={CHROME.textMuted}>{modeDef()?.name ?? 'standard'}</text>

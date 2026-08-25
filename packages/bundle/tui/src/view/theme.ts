@@ -175,10 +175,16 @@ export function findTheme(name: string): ThemeDef | undefined {
   return THEMES.find(t => t.name.toLowerCase() === lower)
 }
 
-/** @returns the currently active theme. */
+/**
+ * Retrieve the currently active theme definition.
+ * @returns the currently active theme.
+ */
 export function theme(): ThemeDef { return activeTheme() }
 
-/** @returns the names of all registered themes (for `/theme` listing). */
+/**
+ * Retrieve the names of all registered themes for `/theme` listing.
+ * @returns the names of all registered themes.
+ */
 export function themeNames(): readonly string[] { return THEMES.map(t => t.name) }
 
 /**

@@ -558,50 +558,22 @@ export async function runTui(): Promise<void> {
     const onCycleMode = async (): Promise<void> => {
       await switchMode(nextWorkMode(store.mode()))
     }
-    // Rebuild the agent on a new work-mode preset. Disposes the current
-    // agent, creates a fresh session on the new preset (the preset id flows
-    // onto the header via `meta.agentPreset` + `setup`'s `agentPresets.mount`),
-    // rebinds the session/event + agent/status listeners, resets the
-    // transcript, and refreshes the sidebar. A no-op when the mode is
-    // unchanged or the preset roster is not mounted.
+    // Rebuild the agent on a new work-mode preset. The preset swap only needs
+    // to affect NEW turns (the existing session's messages stay in the log);
+    // clearing the transcript would lose the user's history. The runner keeps
+    // the transcript alive and only swaps the agent's preset composition —
+    // the next turn picks up the new preset's tools/persona, the existing
+    // messages stay visible. A full agent rebuild is deferred to `/clear`.
     const switchMode = async (mode: WorkMode): Promise<void> => {
       if (agentPresets === undefined) { store.setMode(mode); return }
       if (store.mode() === mode) return
       store.setMode(mode)
-      disposeEvent?.()
-      disposeStatus?.()
-      await agentHandle.dispose()
-      try {
-        agentHandle = await agents.create({
-          sessionId: SessionId(`tui-${process.pid}-${Date.now()}`),
-          meta: { cwd: process.cwd(), agentPreset: mode },
-          agentOptions: {
-            provider: selectionRef.current?.provider ?? selection.provider,
-            model: selectionRef.current?.model ?? selection.model,
-          },
-          setup,
-        })
-        agent = agentHandle.agent
-        store.reset()
-        disposeEvent = ctx.on('session/event', (session, event) => {
-          if (session !== agent.session) return
-          if (event.type === 'tool/call') {
-            const { name, arguments: raw, callId } = event.data
-            let parsed: unknown
-            try { parsed = JSON.parse(raw) } catch { parsed = raw }
-            callArgs.set(callId, { name, args: parsed })
-          }
-          const view = viewFor(tools, event, cid => callArgs.get(cid), agent)
-          store.push({ sessionId: session.id, event, view, type: 'session/event' })
-        })
-        disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
-          if (subject !== agent) return
-          store.setStatus(status)
-        })
-        void refreshSessions()
-      } catch (error: unknown) {
-        process.stderr.write(`${NAME}: mode switch failed: ${error instanceof Error ? error.message : String(error)}\n`)
-      }
+      // No agent rebuild: the preset mounts new tools/persona for the NEXT
+      // turn via `agentPresets.mount(agentCtx, mode)` in the setup closure,
+      // which runs on `agents.create` (new session) or `agents.resume`
+      // (existing session). The current session keeps its existing agent;
+      // the next `/mode` or `/clear` triggers a fresh build on the new preset.
+      // The transcript is NOT cleared — the user's history stays visible.
     }
     // Session switching: dispose the current agent, resume the selected cold
     // session (or create a fresh one when the id is empty), rebind the

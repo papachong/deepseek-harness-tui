@@ -7,13 +7,129 @@
  * @module @deepseek-ai/dsh-tui/tests/live-pty.spec
  */
 
+import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runTuiPtySmoke } from './pty-harness.ts'
 
 const TUI_BIN = resolve(import.meta.dirname, '..', 'lib', 'bin.js')
 const TUI_CONFIG = resolve(import.meta.dirname, '..', 'cordis.yml')
+const REPLAY_FIXTURE = resolve(import.meta.dirname, 'fixtures', 'text-turn.session.jsonl')
+const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..', '..', '..')
 const hasKey = process.env['DEEPSEEK_API_KEY'] !== undefined && process.env['DEEPSEEK_API_KEY'] !== ''
+
+describe('dsh-tui workspace-root PTY input', { timeout: 15_000 }, () => {
+  it('submits a built-in slash command on Enter', async () => {
+    await runTuiPtySmoke({
+      label: 'workspace-root-exit',
+      tempDirPrefix: 'dsh-tui-root-exit-',
+      binPath: TUI_BIN,
+      configPath: TUI_CONFIG,
+      workingDirectory: REPOSITORY_ROOT,
+      columns: 100,
+      rows: 30,
+      timeoutMs: 5_000,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: REPLAY_FIXTURE,
+        DSH_SESSION_ROOT: resolve(tmpdir(), `dsh-tui-root-exit-${process.pid}`),
+      },
+      actions: [{ waitFor: 'task>', send: '/exit\r' }],
+      expectedExitCode: 0,
+    })
+  })
+
+  it('cycles the work mode on Tab', async () => {
+    const output = await runTuiPtySmoke({
+      label: 'workspace-root-tab',
+      tempDirPrefix: 'dsh-tui-root-tab-',
+      binPath: TUI_BIN,
+      configPath: TUI_CONFIG,
+      workingDirectory: REPOSITORY_ROOT,
+      columns: 100,
+      rows: 30,
+      timeoutMs: 5_000,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: REPLAY_FIXTURE,
+        DSH_SESSION_ROOT: resolve(tmpdir(), `dsh-tui-root-tab-${process.pid}`),
+      },
+      actions: [{ waitFor: 'task>', send: '\t' }],
+      expectedExitCode: -9,
+    })
+
+    expect(output).toContain('PTC')
+  })
+
+  it('cycles the work mode on Tab after entering chat', async () => {
+    const output = await runTuiPtySmoke({
+      label: 'workspace-root-chat-tab',
+      tempDirPrefix: 'dsh-tui-root-chat-tab-',
+      binPath: TUI_BIN,
+      configPath: TUI_CONFIG,
+      workingDirectory: REPOSITORY_ROOT,
+      columns: 100,
+      rows: 30,
+      timeoutMs: 5_000,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: REPLAY_FIXTURE,
+        DSH_SESSION_ROOT: resolve(tmpdir(), `dsh-tui-root-chat-tab-${process.pid}`),
+      },
+      actions: [
+        { waitFor: 'task>', send: 'hello\r' },
+        { waitFor: 'Hello! How can I help you?', send: '\t' },
+      ],
+      expectedExitCode: -9,
+    })
+
+    expect(output).toContain('PTC')
+  })
+
+  it('completes a partial slash command before submitting it', async () => {
+    const output = await runTuiPtySmoke({
+      label: 'workspace-root-slash-completion',
+      tempDirPrefix: 'dsh-tui-root-slash-completion-',
+      binPath: TUI_BIN,
+      configPath: TUI_CONFIG,
+      workingDirectory: REPOSITORY_ROOT,
+      columns: 100,
+      rows: 30,
+      timeoutMs: 5_000,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: REPLAY_FIXTURE,
+        DSH_SESSION_ROOT: resolve(tmpdir(), `dsh-tui-root-slash-completion-${process.pid}`),
+      },
+      actions: [{ waitFor: 'task>', send: '/pl\r\r' }],
+      expectedExitCode: -9,
+    })
+
+    expect(output).toContain('plan>')
+  })
+
+  it('submits a prompt when launched outside the package directory', async () => {
+    const output = await runTuiPtySmoke({
+      label: 'workspace-root-replay',
+      tempDirPrefix: 'dsh-tui-root-',
+      binPath: TUI_BIN,
+      configPath: TUI_CONFIG,
+      workingDirectory: REPOSITORY_ROOT,
+      columns: 100,
+      rows: 30,
+      timeoutMs: 5_000,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: REPLAY_FIXTURE,
+        DSH_SESSION_ROOT: resolve(tmpdir(), `dsh-tui-root-${process.pid}`),
+      },
+      actions: [{ waitFor: 'task>', send: 'hello\r' }],
+      expectedExitCode: -9,
+    })
+
+    expect(output).toContain('Hello! How can I help you?')
+  })
+})
 
 describe.skipIf(!hasKey)('dsh-tui live DeepSeek PTY', { timeout: 60_000 }, () => {
   it('renders the model reply with ANSI styling after a typed prompt', async () => {

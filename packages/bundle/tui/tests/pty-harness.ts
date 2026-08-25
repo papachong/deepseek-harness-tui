@@ -34,6 +34,8 @@ export interface TuiPtySmokeOptions {
   readonly binPath: string
   /** `cordis.yml` path argument (or undefined for the built-in default). */
   readonly configPath?: string
+  /** Process working directory; defaults to the TUI package directory. */
+  readonly workingDirectory?: string
   /** Marker-gated input actions. */
   readonly actions?: readonly PtyAction[]
   /** Extra environment for the bin. */
@@ -49,9 +51,8 @@ export interface TuiPtySmokeOptions {
 /** The POSIX python3 PTY driver: `pty.fork`, marker-gated writes, output capture. */
 const POSIX_PTY_DRIVER = String.raw`
 import errno, fcntl, json, os, pty, select, signal, struct, sys, termios, time
-bun, bin_path, config_path, launch_env_json, cwd, actions_json, expected_exit, timeout_seconds, columns, rows = sys.argv[1:]
+bun, bin_path, config_path, cwd, actions_json, expected_exit, timeout_seconds, columns, rows = sys.argv[1:]
 env = os.environ.copy()
-env.update(json.loads(launch_env_json))
 env.update({"COLUMNS": columns, "LINES": rows})
 env.pop("COLORTERM", None)
 actions = json.loads(actions_json)
@@ -112,6 +113,20 @@ function resolveBun(environment: NodeJS.ProcessEnv): string {
   throw new Error('tui-pty: bun not found on PATH; the dsh-tui bin runs under Bun')
 }
 
+const INHERITED_ENVIRONMENT_KEYS = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP'] as const
+
+function createChildEnvironment(overrides: Readonly<NodeJS.ProcessEnv> | undefined): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {}
+  for (const name of INHERITED_ENVIRONMENT_KEYS) {
+    const value = process.env[name]
+    if (value !== undefined) environment[name] = value
+  }
+  for (const [name, value] of Object.entries(overrides ?? {})) {
+    if (value !== undefined) environment[name] = value
+  }
+  return environment
+}
+
 /**
  * Boot `bun lib/bin.js` in a real PTY, drive marker-gated keystrokes, and
  * return the captured terminal output after the expected process exit.
@@ -124,16 +139,16 @@ export async function runTuiPtySmoke(options: TuiPtySmokeOptions): Promise<strin
   // bin from its own package dir (where node_modules lives), NOT from a
   // mkdtemp temp dir (which has no node_modules → the dynamic import fails).
   // The temp dir is only for the session workspace ($DSH_HOME etc.) if needed.
-  const cwd = resolve(options.binPath, '..', '..')
+  const cwd = options.workingDirectory ?? resolve(options.binPath, '..', '..')
   const timeoutMs = options.timeoutMs ?? 30_000
   try {
     const bun = resolveBun(process.env)
+    const environment = createChildEnvironment(options.env)
     const result = await execa('python3', [
       '-c', POSIX_PTY_DRIVER,
       bun,
       options.binPath,
       options.configPath ?? '',
-      JSON.stringify({ ...process.env, ...options.env }),
       cwd,
       JSON.stringify(options.actions ?? []),
       String(options.expectedExitCode ?? 0),
@@ -141,6 +156,8 @@ export async function runTuiPtySmoke(options: TuiPtySmokeOptions): Promise<strin
       String(options.columns ?? 100),
       String(options.rows ?? 30),
     ], {
+      env: environment,
+      extendEnv: false,
       stdin: 'ignore',
       timeout: timeoutMs + 5_000,
       killSignal: 'SIGKILL',

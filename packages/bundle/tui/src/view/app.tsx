@@ -106,6 +106,22 @@ export function App(props: AppProps): JSX.Element {
       toggleSidebar()
     }
   })
+  // The sidebar's key handler is a mutable ref the Sidebar component
+  // populates on mount. The app dispatches to it from the global
+  // useKeyboard so arrow keys / Enter / Esc work even when the prompt
+  // textarea (which preventDefaults its keys) still holds focus.
+  const sidebarKeyHandler = { current: undefined as ((key: 'up' | 'down' | 'enter' | 'escape') => void) | undefined }
+  useKeyboard((key) => {
+    if (!sidebarFocused()) return
+    if (key.name === 'up') { sidebarKeyHandler.current?.('up'); return }
+    if (key.name === 'down') { sidebarKeyHandler.current?.('down'); return }
+    if (key.name === 'return' || key.name === 'enter') { sidebarKeyHandler.current?.('enter'); return }
+    if (key.name === 'escape') {
+      setSidebarOpen(false)
+      setSidebarFocused(false)
+      return
+    }
+  })
   const page = createMemo(() => props.store.state.page)
   const sessionId = createMemo(() =>
     typeof props.currentSessionId === 'function' ? props.currentSessionId() : props.currentSessionId,
@@ -165,6 +181,7 @@ export function App(props: AppProps): JSX.Element {
                 currentSessionId={sessionId()}
                 focused={sidebarFocused}
                 onBlur={() => { setSidebarOpen(false); setSidebarFocused(false) }}
+                keyHandlerRef={sidebarKeyHandler}
                 {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
               />
             )
@@ -176,6 +193,7 @@ export function App(props: AppProps): JSX.Element {
           onOpenPalette={() => setPaletteOpen(true)}
           shouldFocus={shouldFocusPrompt}
           commands={props.commands}
+          {...props.onCycleMode === undefined ? {} : { onCycleMode: props.onCycleMode }}
           {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
         />
         {/* Footer bar (opencode session footer): cwd left, status + mode +

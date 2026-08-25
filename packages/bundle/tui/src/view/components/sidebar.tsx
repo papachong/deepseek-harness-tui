@@ -38,6 +38,13 @@ export interface SidebarProps {
   focused?: () => boolean
   /** Fired when the sidebar yields focus back to the prompt (Esc). */
   onBlur?: () => void
+  /**
+   * The app-level key handler for the sidebar's ↑/↓/Enter. The sidebar's own
+   * onKeyDown never fires because the focused prompt textarea preventDefaults
+   * its keys before they reach the sidebar container. The app's global
+   * useKeyboard dispatches to this handler when the sidebar is focused.
+   */
+  keyHandlerRef?: { current: ((key: 'up' | 'down' | 'enter' | 'escape') => void) | undefined }
 }
 
 /**
@@ -79,6 +86,26 @@ export function Sidebar(props: SidebarProps): JSX.Element {
     if (key.name === 'escape') { props.onBlur?.(); return }
   }
 
+  // The sidebar's own onKeyDown never fires: the focused prompt textarea
+  // preventDefaults its keys, and OpenTUI's key dispatch is capture-phase-first
+  // for the focused element only (not parent boxes). The app's global
+  // useKeyboard dispatches to `keyHandlerRef` when the sidebar is focused.
+  // The sidebar registers its handler on mount.
+  if (props.keyHandlerRef !== undefined) {
+    props.keyHandlerRef.current = (key) => {
+      if (key === 'up') move(-1)
+      else if (key === 'down') move(1)
+      else if (key === 'enter') {
+        const item = list()[selected()]
+        if (item !== undefined) props.onSelectSession?.(item.id)
+      }
+    }
+  }
+
+  // Attach the key handler to the sidebar's box directly. OpenTUI's
+  // `useKeyboard` fires for every key event regardless of focus; the
+  // `focusable` + `focused` props on the box make it the active key target
+  // when the app toggles `sidebarFocused` to true.
   const container = createMemo<JSX.Element>(() => {
     const style = inline()
       ? { width: SIDEBAR_WIDTH, flexShrink: 0 }
@@ -96,6 +123,10 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         focusable
         focused={isFocused()}
         focusedBorderColor={CHROME.borderActive}
+        // The container's onKeyDown catches keys BEFORE they reach the focused
+        // child (the textarea in the prompt). OpenTUI's key dispatch is
+        // capture-phase-first for parent boxes, so the sidebar's ↑/↓/Enter
+        // handlers fire even when the prompt textarea is the focused element.
         onKeyDown={onKey}
       >
         <box flexDirection="row">
