@@ -80,16 +80,18 @@ export function SlashMenu(props: SlashMenuProps): JSX.Element {
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
+        width="100%"
+        flexShrink={0}
       >
         <For each={filtered()}>
           {(cmd, index) => {
             const isActive = createMemo(() => index() === selected())
             return (
-              <box flexDirection="row">
-                <text fg={isActive() ? ROLE_COLORS.assistant : CHROME.text}>
+              <box flexDirection="row" width="100%" flexShrink={0}>
+                <text fg={isActive() ? ROLE_COLORS.assistant : CHROME.text} flexShrink={0}>
                   <b>{isActive() ? '▸ ' : '  '}{cmd.label}</b>
                 </text>
-                <text fg={CHROME.textMuted}> — {cmd.description}</text>
+                <text fg={CHROME.textMuted} flexShrink={1}> — {cmd.description}</text>
               </box>
             )
           }}
