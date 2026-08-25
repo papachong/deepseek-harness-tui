@@ -34,7 +34,7 @@ import type { ToolEventView } from './transport/event-source.js'
 import { registerApprovalAnswerer, registerUserQuestionProvider } from './answerers.ts'
 import { dryRunCapture } from './capture.ts'
 import { createTuiStore, type TuiStore, type SessionListItem } from './view/store.js'
-import { createTuiRenderer, renderApp } from './view/renderer.js'
+import { createTuiRenderer, renderApp, dismissConsoleOverlay } from './view/renderer.js'
 import { theme, themeNames, switchTheme } from './view/theme.js'
 import { nextWorkMode, type WorkMode } from './view/modes.js'
 import type { CommandEntry } from './view/components/command-palette.js'
@@ -705,6 +705,12 @@ export async function runTui(): Promise<void> {
       ),
       renderer,
     )
+    // Defensive: the terminal-console overlay may have auto-opened during boot
+    // (a transient render error before `openConsoleOnError: false` took effect,
+    // or a plugin error). The overlay attaches its own stdin handler and would
+    // swallow every key event, so hide it once after mount. `hide()` is a no-op
+    // when the console is not visible.
+    dismissConsoleOverlay(renderer)
     // renderApp() resolves after mounting + renderer.start(); it does NOT
     // block. The renderer's frame loop + stdin key dispatch run on Bun's
     // event loop, but the runner's control flow would fall through to the

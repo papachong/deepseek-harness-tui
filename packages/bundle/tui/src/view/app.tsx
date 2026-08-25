@@ -21,7 +21,6 @@ import { Message } from './components/message.js'
 import { ToolCard } from './components/tool-card.js'
 import { Plan, Todos } from './components/projections.js'
 import { Prompt } from './components/prompt.js'
-import { StatusBar } from './components/status-bar.js'
 import { Sidebar } from './components/sidebar.js'
 import { CommandPalette } from './components/command-palette.js'
 import { Home } from './components/home.js'
@@ -88,19 +87,23 @@ export function App(props: AppProps): JSX.Element {
   )
   const todosBlock = createMemo(() => <Todos todos={props.store.state.todos} />)
   const [paletteOpen, setPaletteOpen] = createSignal(false)
-  // Sidebar↔prompt focus toggle: OpenTUI has no focusManager, so the app owns
-  // the region via a signal. Ctrl-S flips it; the sidebar and prompt each
-  // read the signal to focus/blur their element.
+  // Sidebar visibility + focus: opencode keeps the session sidebar hidden by
+  // default and opens it on demand (`<leader>b`); dsh-tui uses Ctrl-S as the
+  // single toggle. `sidebarOpen` controls rendering (hidden by default);
+  // `sidebarFocused` tracks which region holds the keyboard. When the sidebar
+  // opens it takes focus; Esc (handled in the sidebar) or a second Ctrl-S
+  // closes it and hands focus back to the prompt.
+  const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [sidebarFocused, setSidebarFocused] = createSignal(false)
   const shouldFocusPrompt = createMemo(() => !sidebarFocused())
-  // Global keybind: Ctrl-S toggles focus between the prompt and the sidebar
-  // (OpenTUI has no focusManager, so the app owns the region toggle). The
-  // sidebar reads `sidebarFocused` to focus/blur; the prompt reads
-  // `shouldFocusPrompt` (its inverse). The key is caught globally so it
-  // works regardless of which region currently holds focus.
+  const toggleSidebar = (): void => {
+    const next = !sidebarOpen()
+    setSidebarOpen(next)
+    setSidebarFocused(next)
+  }
   useKeyboard((key) => {
     if (key.ctrl && key.name === 's') {
-      setSidebarFocused(prev => !prev)
+      toggleSidebar()
     }
   })
   const page = createMemo(() => props.store.state.page)
@@ -108,7 +111,16 @@ export function App(props: AppProps): JSX.Element {
     typeof props.currentSessionId === 'function' ? props.currentSessionId() : props.currentSessionId,
   )
   const modeName = createMemo(() => workMode(props.store.state.mode)?.name ?? props.store.state.mode)
-  // Home page: centered banner + hero prompt. The first submission flips the
+  const modelLabel = createMemo(() => {
+    const m = props.store.model()
+    return m.model === '' ? '' : m.model
+  })
+  const status = createMemo(() => props.store.state.status)
+  // Home page: centered wordmark + hero prompt. The first submission flips the
+  // store page to 'chat' in the runner's onSubmit, which swaps this branch out.
+  // Rendered as a memo read inside the returned JSX (NOT an early return) so
+  // Solid tracks the `page()` dependency and swaps layouts reactively.
+  // Home page: centered wordmark + hero prompt. The first submission flips the
   // store page to 'chat' in the runner's onSubmit, which swaps this branch out.
   // Rendered as a memo read inside the returned JSX (NOT an early return) so
   // Solid tracks the `page()` dependency and swaps layouts reactively.
@@ -124,12 +136,16 @@ export function App(props: AppProps): JSX.Element {
         />
       )
     }
-    // Chat layout: status bar + transcript + sidebar + prompt + bottom info area.
+    // Chat layout (opencode session route): the transcript fills the frame
+    // with horizontal padding; the prompt pins to the bottom; the footer bar
+    // shows cwd + mode + status. The sidebar is hidden by default and opens
+    // as an overlay via Ctrl-S (matching opencode's `<leader>b` toggle).
+    // The prompt's own `flexDirection` is row so it grows horizontally with
+    // the transcript column; the footer is `flexShrink: 0` so it never wraps.
     return (
       <box flexDirection="column" height="100%">
-        <StatusBar store={props.store} />
-        <box flexDirection="row" flexGrow={1} minHeight={3}>
-          <box flexGrow={1}>
+        <box flexDirection="row" flexGrow={1} minHeight={0}>
+          <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2}>
             <scrollbox stickyScroll stickyStart="bottom">
               <For each={transcript()}>
                 {(item: TranscriptItem) =>
@@ -142,13 +158,17 @@ export function App(props: AppProps): JSX.Element {
               <Plan active={props.store.state.planActive} />
             </scrollbox>
           </box>
-          <Sidebar
-            store={props.store}
-            currentSessionId={sessionId()}
-            focused={sidebarFocused}
-            onBlur={() => setSidebarFocused(false)}
-            {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
-          />
+          {sidebarOpen()
+            ? (
+              <Sidebar
+                store={props.store}
+                currentSessionId={sessionId()}
+                focused={sidebarFocused}
+                onBlur={() => { setSidebarOpen(false); setSidebarFocused(false) }}
+                {...props.onSelectSession === undefined ? {} : { onSelectSession: props.onSelectSession }}
+              />
+            )
+            : undefined}
         </box>
         <Prompt
           store={props.store}
@@ -158,9 +178,17 @@ export function App(props: AppProps): JSX.Element {
           commands={props.commands}
           {...props.resolveMentions === undefined ? {} : { resolveMentions: props.resolveMentions }}
         />
-        <box border={['top']} borderStyle="single" borderColor={CHROME.border} paddingLeft={1} paddingRight={1} flexDirection="column">
-          <text fg={CHROME.textMuted}> mode: {modeName()} · session: {sessionId()} </text>
-          <text fg={CHROME.textMuted}> Tab cycle mode · Ctrl+S sessions · Ctrl+P palette </text>
+        {/* Footer bar (opencode session footer): cwd left, status + mode +
+            shortcuts right. `flexShrink: 0` on every cell so the row never
+            collapses under a narrow terminal. */}
+        <box width="100%" flexShrink={0} flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2}>
+          <text fg={CHROME.textMuted} flexShrink={0}>{process.cwd()}</text>
+          <box flexDirection="row" gap={2} flexShrink={0}>
+            <text fg={CHROME.textMuted} flexShrink={0}>{status()}</text>
+            <text fg={CHROME.textMuted} flexShrink={0}>{modeName()}</text>
+            {modelLabel() === '' ? undefined : <text fg={CHROME.textMuted} flexShrink={0}>{modelLabel()}</text>}
+            <text fg={CHROME.textMuted} flexShrink={0}>ctrl+s sessions · ctrl+p palette · tab mode</text>
+          </box>
         </box>
         <CommandPalette
           open={paletteOpen()}
@@ -170,7 +198,12 @@ export function App(props: AppProps): JSX.Element {
       </box>
     )
   })
-  return layout()
+  // App's returned JSX must swap with the layout branch reactively. A bare
+  // `return layout()` reads the memo once at mount — outside a tracking scope
+  // the read is one-shot, so the home branch would stick forever. Returning
+  // `layout()` inside a JSX fragment makes the Solid JSX runtime insert the
+  // memo's value as a reactive expression child, which re-renders on `page()`.
+  return <>{layout()}</>
 }
 
 /**

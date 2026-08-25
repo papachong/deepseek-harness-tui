@@ -24,12 +24,24 @@
 import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal, createEffect, onCleanup, type Accessor } from 'solid-js'
 import type { TextareaRenderable, KeyEvent } from '@opentui/core'
-import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
+import { CHROME, STATUS_COLORS } from '../theme.js'
+import { workMode } from '../modes.js'
 import type { TuiStore } from '../store.js'
 import { SlashMenu, slashToken } from './slash-menu.js'
 import { MentionMenu } from './mention-menu.js'
 import type { CommandEntry } from './command-palette.js'
 import type { MentionEntry } from './mention-menu.js'
+
+/**
+ * The left-border character for the prompt box. Mirrors opencode's
+ * `SplitBorder.customBorderChars.vertical` (`┃`) so the prompt reads as a
+ * raised panel against the terminal background.
+ */
+const PROMPT_BORDER_CHARS = {
+  topLeft: '', bottomLeft: '', topRight: '', bottomRight: '',
+  horizontal: ' ', bottomT: '', topT: '', cross: '', leftT: '', rightT: '',
+  vertical: '┃',
+}
 /** Props for {@link Prompt}. */
 export interface PromptProps {
   /** The store exposing `pendingQuestion()` for answer-mode routing. */
@@ -55,21 +67,32 @@ export interface PromptProps {
  * rendered above the input with a `Q:` prefix, the placeholder reads
  * `answer> `, and the submitted line resolves the pending answer; otherwise
  * the placeholder reads `task> ` (or `plan> ` in plan mode) and the submitted
- * line fires {@link PromptProps.onSubmit}. A colored `❯` prefix sits left of
- * the input; its color tracks the mode (cyan task, magenta plan, yellow answer).
- * The `hero` prop drops the top border for the centered home layout.
+ * line fires {@link PromptProps.onSubmit}. The chrome matches opencode's
+ * prompt (component/prompt/index.tsx:1350-1485): a left `┃` border rule and
+ * an elevated `bgElement` panel, identical on the home hero and the chat
+ * page so the input reads as one persistent component across the page swap.
+ * The `hero` prop is retained for call-site readability; the visual chrome
+ * no longer differs by surface.
  * @param props - the prompt props.
  * @returns the JSX element for the prompt input.
  */
 export function Prompt(props: PromptProps): JSX.Element {
   const isAnswer = createMemo(() => props.store.pendingQuestion() !== undefined)
   const isPlan = createMemo(() => props.store.state.planActive)
-  const prefixColor = createMemo(() =>
-    isAnswer() ? STATUS_COLORS.pending : isPlan() ? '#c678dd' : ROLE_COLORS.user,
+  const borderColor = createMemo(() =>
+    isAnswer() ? STATUS_COLORS.pending : isPlan() ? '#c678dd' : CHROME.border,
   )
   const placeholder = createMemo(() =>
     isAnswer() ? 'answer> ' : isPlan() ? 'plan> ' : 'task> ',
   ) as Accessor<string>
+  // Meta row (opencode prompt:1451-1465): the active work-mode name and the
+  // model id render under the textarea so the hero and chat prompts both
+  // surface the composition state without a separate status bar.
+  const modeName = createMemo(() => workMode(props.store.mode())?.name ?? props.store.mode())
+  const modelLabel = createMemo(() => {
+    const m = props.store.model()
+    return m.model === '' ? '' : m.model
+  })
 
   const handleSubmit = (value: string): void => {
     if (props.store.resolveAnswer(value)) return
@@ -291,90 +314,120 @@ export function Prompt(props: PromptProps): JSX.Element {
   }
 
   return (
-    <box
-      {...(props.hero === true
-        ? {}
-        : { border: ['top'] as const, borderStyle: 'single' as const, borderColor: CHROME.border, paddingTop: 0, paddingBottom: 0 })}
-    >
+    <box width="100%">
       {banner()}
       {slashMenu()}
       {mentionMenu()}
-      <box paddingLeft={1} flexDirection="row">
-        <text fg={prefixColor()}><b>❯ </b></text>
-        <textarea
-          ref={(el: TextareaRenderable) => { setInputEl(el) }}
-          focused
-          minHeight={1}
-          maxHeight={6}
-          placeholder={placeholder()}
-          onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
-          onKeyDown={(key: KeyEvent) => {
-            // Tab cycles the work mode (the runner rebuilds the agent); the
-            // textarea would otherwise insert a literal Tab, so prevent it.
-            if (key.name === 'tab' && props.onCycleMode !== undefined) {
-              props.onCycleMode()
-              key.preventDefault()
-              return
-            }
-            // When a menu is open, it owns ↑/↓/Enter/Esc. The menus' onKeyDown
-            // is on parent <box> elements, but OpenTUI delivers key events to
-            // the focused textarea first; if the textarea's onKeyDown calls
-            // preventDefault, the event does NOT bubble to the parent. So the
-            // menu must complete/submit HERE (not rely on bubbling), and then
-            // preventDefault to stop the native newline/submit.
-            if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'kpenter' || key.name === 'escape')) {
-              key.preventDefault()
-              if (key.name === 'up') { menuMove(-1); return }
-              if (key.name === 'down') { menuMove(1); return }
-              if (key.name === 'escape') {
-                if (slashOpen()) {
-                  const stripped = liveValue().replace(/^\s*\//, '')
-                  setLiveValue(stripped)
-                  if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
+      {/*
+        opencode chrome: a left SplitBorder rule + elevated backgroundElement
+        panel. In non-hero (chat) mode the border and background are identical
+        to the home hero so the prompt reads as one persistent component.
+        The chat page previously relied on a top border here; the redesign
+        moves the visual separation into the box background + left rule.
+      */}
+      <box
+        width="100%"
+        border={['left']}
+        borderColor={borderColor()}
+        customBorderChars={PROMPT_BORDER_CHARS}
+      >
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          flexShrink={0}
+          backgroundColor={CHROME.bgElement}
+          flexGrow={1}
+          width="100%"
+        >
+          <box flexDirection="row">
+            <textarea
+              ref={(el: TextareaRenderable) => { setInputEl(el) }}
+              focused
+              width="100%"
+              minHeight={1}
+              maxHeight={6}
+              placeholder={placeholder()}
+              onContentChange={() => { const v = inputEl()?.editBuffer.getText() ?? ''; setLiveValue(v); historyCursor = null }}
+              onKeyDown={(key: KeyEvent) => {
+                // Tab cycles the work mode (the runner rebuilds the agent); the
+                // textarea would otherwise insert a literal Tab, so prevent it.
+                if (key.name === 'tab' && props.onCycleMode !== undefined) {
+                  props.onCycleMode()
+                  key.preventDefault()
+                  return
                 }
-                setMentionEntries([])
-                return
-              }
-              // Enter: complete the selected menu item.
-              menuComplete()
-              return
-            }
-            // Bare Enter (no modifiers) submits the input. OpenTUI's
-            // TextareaRenderable binds bare `return` to `newline` (not
-            // `submit`), so without this interception Enter inserts a newline.
-            // opencode overrides this via @opentui/keymap's managed textarea
-            // layer; dsh-tui does not use that layer, so intercept here:
-            // bare Enter → handleSubmit + preventDefault. Shift/Ctrl/Alt+Enter
-            // inserts a newline.
-            if ((key.name === 'return' || key.name === 'enter' || key.name === 'kpenter')
-              && !key.shift && !key.ctrl && !key.meta) {
-              handleSubmit(liveValue())
-              key.preventDefault()
-              return
-            }
-            if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
-              // Ctrl-P with no history → open the command palette instead.
-              if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {
-                props.onOpenPalette()
-                key.preventDefault()
-                return
-              }
-              navigateHistory('up')
-              key.preventDefault()
-            } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
-              navigateHistory('down')
-              key.preventDefault()
-            }
-          }}
-          onSubmit={() => {
-            // Fallback: the native TextareaRenderable fires onSubmit on
-            // meta+return / linefeed. The bare-Enter path in onKeyDown
-            // handles the common case; this covers the modifier-bound submit
-            // the textarea still owns.
-            const value = liveValue()
-            handleSubmit(value)
-          }}
-        />
+                // When a menu is open, it owns ↑/↓/Enter/Esc. The menus' onKeyDown
+                // is on parent <box> elements, but OpenTUI delivers key events to
+                // the focused textarea first; if the textarea's onKeyDown calls
+                // preventDefault, the event does NOT bubble to the parent. So the
+                // menu must complete/submit HERE (not rely on bubbling), and then
+                // preventDefault to stop the native newline/submit.
+                if (menuOpen() && (key.name === 'up' || key.name === 'down' || key.name === 'return' || key.name === 'enter' || key.name === 'kpenter' || key.name === 'escape')) {
+                  key.preventDefault()
+                  if (key.name === 'up') { menuMove(-1); return }
+                  if (key.name === 'down') { menuMove(1); return }
+                  if (key.name === 'escape') {
+                    if (slashOpen()) {
+                      const stripped = liveValue().replace(/^\s*\//, '')
+                      setLiveValue(stripped)
+                      if (inputEl() !== undefined) inputEl()?.editBuffer.setText(stripped)
+                    }
+                    setMentionEntries([])
+                    return
+                  }
+                  // Enter: complete the selected menu item.
+                  menuComplete()
+                  return
+                }
+                // Bare Enter (no modifiers) submits the input. OpenTUI's
+                // TextareaRenderable binds bare `return` to `newline` (not
+                // `submit`), so without this interception Enter inserts a newline.
+                // opencode overrides this via @opentui/keymap's managed textarea
+                // layer; dsh-tui does not use that layer, so intercept here:
+                // bare Enter → handleSubmit + preventDefault. Shift/Ctrl/Alt+Enter
+                // inserts a newline.
+                if ((key.name === 'return' || key.name === 'enter' || key.name === 'kpenter')
+                  && !key.shift && !key.ctrl && !key.meta) {
+                  handleSubmit(liveValue())
+                  key.preventDefault()
+                  return
+                }
+                if (key.name === 'up' || (key.ctrl && key.name === 'p')) {
+                  // Ctrl-P with no history → open the command palette instead.
+                  if (key.ctrl && key.name === 'p' && history().length === 0 && props.onOpenPalette !== undefined) {
+                    props.onOpenPalette()
+                    key.preventDefault()
+                    return
+                  }
+                  navigateHistory('up')
+                  key.preventDefault()
+                } else if (key.name === 'down' || (key.ctrl && key.name === 'n')) {
+                  navigateHistory('down')
+                  key.preventDefault()
+                }
+              }}
+              onSubmit={() => {
+                // Fallback: the native TextareaRenderable fires onSubmit on
+                // meta+return / linefeed. The bare-Enter path in onKeyDown
+                // handles the common case; this covers the modifier-bound submit
+                // the textarea still owns.
+                const value = liveValue()
+                handleSubmit(value)
+              }}
+            />
+          </box>
+          {/* Meta row: mode + model, mirroring opencode's prompt footer. */}
+          <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1}>
+            <text fg={CHROME.textMuted}>{modeName()}</text>
+            {modelLabel() === '' ? undefined : (
+              <box flexDirection="row" gap={1}>
+                <text fg={CHROME.textMuted}>·</text>
+                <text fg={CHROME.textMuted}>{modelLabel()}</text>
+              </box>
+            )}
+          </box>
+        </box>
       </box>
     </box>
   )

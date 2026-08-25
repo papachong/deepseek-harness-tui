@@ -1,13 +1,15 @@
 /**
  * The `<Message>` component: renders one {@link MessageEntry} (user or
- * assistant) as a bordered block with a role-colored left border, prefix glyph,
- * streaming markdown body, optional reasoning block, and a usage footer.
+ * assistant) in opencode's transcript style. A user message is a padded panel
+ * with a left `┃` rule colored by role and the panel background; an assistant
+ * message is a bare indented markdown block with a `▣ · tokens · duration`
+ * meta line once the step completes. Streaming shows a `▋` cursor; reasoning
+ * renders as a dim collapsible header above the body.
  *
- * Mirrors opencode's UserMessage/AssistantMessage/ReasoningPart/TextPart layout
- * but against the local store (no opencode SDK coupling): the role discriminant
- * drives border color and prefix; reasoning renders as a dim collapsed block;
- * usage renders as a muted `↑in ↓out` footer; interrupted renders a red tag;
- * streaming shows a `▋` cursor instead of a static placeholder.
+ * Mirrors opencode's `UserMessage` / `AssistantMessage` / `TextPart` layout
+ * (routes/session/index.tsx:1365, 1470, 1687) against the local store: the
+ * role discriminant picks the panel vs. bare-block layout; no prefix glyph
+ * header line is rendered (the border color carries the role cue).
  *
  * NOTE: uses memo-conditionals instead of `<Show>` — the OpenTUI Solid
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch that
@@ -17,10 +19,21 @@
  */
 
 import { type JSX } from '@opentui/solid'
-import { createMemo, createSignal } from 'solid-js'
-import { ROLE_COLORS, ROLE_PREFIX, CHROME, buildSyntaxStyle, STATUS_COLORS } from '../theme.js'
+import { createSignal } from 'solid-js'
+import { ROLE_COLORS, CHROME, buildSyntaxStyle } from '../theme.js'
 import { Spinner } from './spinner.js'
 import type { MessageEntry } from '../store.js'
+
+/**
+ * The left-border character for user-message panels (opencode's
+ * `SplitBorder.customBorderChars`: only the vertical is a visible `┃`; the
+ * corners and horizontals are empty so no box frame closes around the block).
+ */
+const SPLIT_BORDER_CHARS = {
+  topLeft: '', bottomLeft: '', topRight: '', bottomRight: '',
+  horizontal: ' ', bottomT: '', topT: '', cross: '', leftT: '', rightT: '',
+  vertical: '┃',
+}
 
 /**
  * Module-level cached {@link SyntaxStyle}. Built once from the active theme's
@@ -36,57 +49,68 @@ export interface MessageProps {
 }
 
 /**
- * Render one message as a bordered block. The outer `<box>` has a left border
- * colored by role; the body is streaming markdown (assistant) or plain text
- * (user). When the entry has reasoning, a dim block renders above the body.
- * A usage footer and interrupted tag render when present.
+ * Render one message. The layout dispatches on the role: a user message is a
+ * padded panel with a left `┃` rule (opencode's `UserMessage`, background =
+ * `bgPanel`); an assistant message is a bare indented markdown block (opencode's
+ * `TextPart`, `paddingLeft={3}`, no border) with a `▣ mode · model · duration`
+ * meta line when the step completes. Reasoning renders as a dim collapsible
+ * header above the body; a usage footer and interrupted tag render when present.
  * @param props - the message props.
  * @returns the JSX element for the message.
  */
 export function Message(props: MessageProps): JSX.Element {
-  const role = createMemo(() => props.entry.role)
-  const borderColor = createMemo(() => ROLE_COLORS[role()])
-  const prefix = createMemo(() => ROLE_PREFIX[role()])
-  const showMarkdown = createMemo(() => props.entry.text !== '' || !props.entry.streaming)
-  const showReasoning = createMemo(() => props.entry.reasoning !== undefined && props.entry.reasoning !== '')
-  const showUsage = createMemo(() => props.entry.usage !== undefined)
-  const showInterrupted = createMemo(() => props.entry.interrupted === true)
+  // The assistant TextPart path needs no reactive root: every field it reads
+  // (`text`, `streaming`, `reasoning`, `usage`, timestamps) is a leaf on the
+  // store proxy that the parent `<For>` re-supplies on change. Computing the
+  // JSX inline (not inside `createMemo`) keeps every read inside Solid's
+  // tracking scope — a memo that returns JSX closes over the first evaluation
+  // and never re-tracks the inner `<markdown content>` accessor.
+  const isUser = props.entry.role === 'user'
+  const showMarkdown = props.entry.text !== '' || !props.entry.streaming
+  const showReasoning = props.entry.reasoning !== undefined && props.entry.reasoning !== ''
+  const showUsage = props.entry.usage !== undefined
+  const showInterrupted = props.entry.interrupted === true
+  const borderColor = ROLE_COLORS[props.entry.role]
   // Reasoning collapse: default collapsed (one-line header); expandable to show
   // the full thought chain. A signal per message instance; OpenTUI has no click
   // on <text>, so the toggle is driven by a key the runner could later wire to
   // a keymap (e.g. Tab on the focused reasoning header). For now the header
   // shows the toggle glyph and the state stays collapsed until expanded.
   const [reasoningExpanded] = createSignal(false)
-  // Step duration: finishedAt - startedAt (epoch ms). Undefined while
-  // streaming or before both timestamps land.
-  const durationMs = createMemo(() => {
+  const durationMs = ((): number | undefined => {
     const start = props.entry.startedAt
     const end = props.entry.finishedAt
     return start !== undefined && end !== undefined ? end - start : undefined
-  })
+  })()
 
-  const reasoningBlock = createMemo<JSX.Element>(() => {
-    if (!showReasoning()) return undefined
+  const reasoningBlock = (): JSX.Element => {
+    if (!showReasoning) return undefined
     const glyph = reasoningExpanded() ? '▼' : '▶'
     return (
-      <box paddingLeft={1} marginTop={0} marginBottom={0}>
+      <box marginBottom={1}>
         <box flexDirection="row">
           <text fg={CHROME.textMuted}><i>{glyph} thought</i></text>
-          {props.entry.streaming
-            ? <text fg={CHROME.textMuted}> <Spinner fg={CHROME.textMuted} /></text>
-            : undefined}
+          {/*
+            The streaming spinner renders as a sibling of the header text,
+            NOT a child of <text>: OpenTUI's <text> only accepts string /
+            TextNodeRenderable / StyledText children, and a component child
+            there throws "TextNodeRenderable only accepts strings…" at
+            insert time (the same rule applies to the streaming caret and
+            the meta line below).
+          */}
+          {props.entry.streaming ? <Spinner fg={CHROME.textMuted} /> : undefined}
         </box>
         {reasoningExpanded()
           ? <text fg={CHROME.textMuted}>{props.entry.reasoning}</text>
           : undefined}
       </box>
     )
-  })
+  }
 
-  const body = createMemo<JSX.Element>(() => {
-    if (!showMarkdown()) {
+  const body = (): JSX.Element => {
+    if (!showMarkdown) {
       return (
-        <box>
+        <box flexDirection="row">
           <Spinner fg={CHROME.textMuted} />
           <text fg={CHROME.textMuted}> thinking…</text>
         </box>
@@ -102,37 +126,63 @@ export function Message(props: MessageProps): JSX.Element {
           syntaxStyle={SYNTAX_STYLE}
           conceal
         />
-        {props.entry.streaming ? <text fg={borderColor()}>▋</text> : undefined}
+        {props.entry.streaming ? <text fg={borderColor}>▋</text> : undefined}
       </box>
     )
-  })
+  }
 
-  const footer = createMemo<JSX.Element>(() => {
-    if (!showUsage() && !showInterrupted() && !durationMs()) return undefined
+  // Assistant meta line (opencode AssistantMessage:1549-1573): `▣ · tokens ·
+  // duration` rendered after the last part once the step completes or is
+  // interrupted. Each segment is its own <text> sibling: a <span> expression
+  // child inside <text> crashes the OpenTUI reconciler ("TextNodeRenderable
+  // only accepts strings…") because the spread `style` prop resolves to an
+  // object child.
+  const meta = (): JSX.Element => {
+    if (props.entry.streaming && !showInterrupted) return undefined
+    if (!showUsage && !showInterrupted && durationMs === undefined) return undefined
     const usage = props.entry.usage
     return (
-      <box flexDirection="row">
-        {showUsage() && usage ? <text fg={CHROME.textMuted}>  ↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
-        {usage?.cacheReadTokens ? <text fg={CHROME.textMuted}> ⤒{usage.cacheReadTokens}</text> : undefined}
-        {durationMs() !== undefined ? <text fg={CHROME.textMuted}> ·{formatDuration(durationMs() ?? 0)}</text> : undefined}
-        {showInterrupted() ? <text fg={STATUS_COLORS.error}>  [interrupted]</text> : undefined}
+      <box marginTop={1} flexDirection="row">
+        <text fg={showInterrupted ? CHROME.textMuted : borderColor}>▣ </text>
+        {showUsage && usage ? <text fg={CHROME.textMuted}>↑{usage.inputTokens} ↓{usage.outputTokens}</text> : undefined}
+        {usage?.cacheReadTokens ? <text fg={CHROME.textMuted}> · ⤒{usage.cacheReadTokens}</text> : undefined}
+        {durationMs !== undefined ? <text fg={CHROME.textMuted}> · {formatDuration(durationMs)}</text> : undefined}
+        {showInterrupted ? <text fg={CHROME.textMuted}> · interrupted</text> : undefined}
       </box>
     )
-  })
+  }
 
+  // User message: padded panel with a left `┃` rule and the panel background
+  // (opencode's UserMessage:1397-1420). No prefix glyph; the border color
+  // carries the role cue.
+  if (isUser) {
+    return (
+      <box
+        border={['left']}
+        borderColor={borderColor}
+        customBorderChars={SPLIT_BORDER_CHARS}
+        marginTop={1}
+      >
+        <box
+          paddingTop={1}
+          paddingBottom={1}
+          paddingLeft={2}
+          backgroundColor={CHROME.bgPanel}
+          flexShrink={0}
+        >
+          <text fg={CHROME.text}>{props.entry.text}</text>
+        </box>
+      </box>
+    )
+  }
+
+  // Assistant message: bare indented markdown (opencode's TextPart:1692:
+  // paddingLeft={3}, no border) with the meta line when the step completes.
   return (
-    <box
-      border={['left']}
-      borderStyle="single"
-      borderColor={borderColor()}
-      paddingLeft={1}
-      paddingRight={1}
-      marginTop={1}
-    >
-      <text fg={borderColor()}><b>{prefix()} </b></text>
+    <box paddingLeft={3} marginTop={1} flexShrink={0}>
       {reasoningBlock()}
       {body()}
-      {footer()}
+      {meta()}
     </box>
   )
 }

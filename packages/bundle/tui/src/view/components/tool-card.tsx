@@ -77,7 +77,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   ))
 
   const body = createMemo<JSX.Element>(() => {
-    if (isPending()) return <text fg={CHROME.textMuted}>running…</text>
+    if (isPending()) return <text fg={CHROME.textMuted}>  running…</text>
     if (!hasResult()) return undefined
     // Dispatch on the host-computed resultView when present.
     const view = props.tool.resultView
@@ -97,14 +97,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   })
 
   return (
-    <box
-      border={['left']}
-      borderStyle="single"
-      borderColor={isError() ? STATUS_COLORS.error : CHROME.border}
-      paddingLeft={1}
-      paddingRight={1}
-      marginTop={1}
-    >
+    <box paddingLeft={3} marginTop={1}>
       {header()}
       {body()}
     </box>
@@ -134,7 +127,7 @@ function renderGenericResult(
   const truncated = lines.length > MAX_RESULT_LINES && !expanded
   const shown = truncated ? lines.slice(0, limit) : lines
   return (
-    <box>
+    <box paddingLeft={2}>
       {title !== undefined ? <text fg={CHROME.textMuted}>{title}</text> : undefined}
       <For each={shown}>
         {(line: string) => <text fg={isError ? STATUS_COLORS.error : diffLineColor(line)}>{line}</text>}

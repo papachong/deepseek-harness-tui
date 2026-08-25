@@ -12,8 +12,28 @@
  * @module @deepseek-ai/dsh-tui/view/theme
  */
 
-import { SyntaxStyle } from '@opentui/core'
+import { RGBA, SyntaxStyle } from '@opentui/core'
 import { createSignal } from 'solid-js'
+
+/**
+ * Linearly blend `a` toward `b` by `factor` (0 → a, 1 → b), returning a
+ * `#rrggbb` hex string. Used for the logo shadow cells (25% toward the
+ * background) and any hover/pressed color derivation. Mirrors opencode's
+ * theme `tint` helper.
+ * @param a - the source color.
+ * @param b - the target color.
+ * @param factor - blend factor in [0, 1].
+ * @returns the blended `#rrggbb` hex color.
+ */
+export function tint(a: string, b: string, factor: number): string {
+  const ca = RGBA.fromHex(a)
+  const cb = RGBA.fromHex(b)
+  const mix = (x: number, y: number): number => Math.round(x + (y - x) * factor)
+  const r = mix(ca.r, cb.r)
+  const g = mix(ca.g, cb.g)
+  const bch = mix(ca.b, cb.b)
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${bch.toString(16).padStart(2, '0')}`
+}
 
 /** Message author role, drives the left-border color and the prefix glyph. */
 export type Role = 'user' | 'assistant'

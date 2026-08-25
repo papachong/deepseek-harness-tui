@@ -124,8 +124,32 @@ export function findSo(): string {
  */
 export async function createTuiRenderer(): Promise<CliRenderer> {
   setRenderLibPath(findSo())
-  const renderer = await createCliRenderer()
+  // `openConsoleOnError: false`: OpenTUI's default opens a terminal-console
+  // overlay the moment any Solid computation throws, which steals the screen
+  // (and the keyboard) instead of surfacing the error in the transcript.
+  // opencode sets the same flag (packages/tui/src/app.tsx:203); render errors
+  // still reach `renderer.console` / stderr via the process handlers.
+  const renderer = await createCliRenderer({ openConsoleOnError: false })
   return renderer
+}
+
+/**
+ * Dismiss the renderer's terminal-console overlay when it is open. The
+ * console overlay grabs the keyboard (it attaches its own stdin handler), so
+ * a leftover open console swallows the app's key events even after
+ * `openConsoleOnError` stops the auto-open path. Call this after boot and on
+ * each submitted task so a transient render error cannot strand the UI.
+ * @param renderer - the renderer returned by {@link createTuiRenderer}.
+ * @returns void.
+ */
+export function dismissConsoleOverlay(renderer: CliRenderer): void {
+  // `isVisible` is private in the .d.ts; the runtime object exposes it. When
+  // the console is hidden, `hide()` is a no-op (it only detaches stdin when
+  // attached), so the extra call is cheap and branchless. The cast names the
+  // one runtime field we touch; the rest of the TerminalConsole API stays
+  // typed through CliRenderer.console.
+  const console_ = renderer.console as unknown as { isVisible?: boolean; hide(): void }
+  if (console_.isVisible === true) console_.hide()
 }
 
 /**
