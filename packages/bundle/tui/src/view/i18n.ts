@@ -83,10 +83,10 @@ const DICTIONARIES: Record<Locale, Record<string, string>> = {
 
 const [localeSignal, setLocaleSignal] = createSignal<Locale>(detectLocale())
 
-/** The active locale accessor (reads the signal). */
+/** The active locale accessor (reads the signal). @returns the active locale. */
 export function locale(): Locale { return localeSignal() }
 
-/** The available locales for `/lang` listing. */
+/** The available locales for `/lang` listing. @returns the supported locale codes. */
 export function localeNames(): readonly Locale[] { return ['en', 'zh'] }
 
 /**
