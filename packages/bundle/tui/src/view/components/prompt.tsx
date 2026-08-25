@@ -335,9 +335,13 @@ export function Prompt(props: PromptProps): JSX.Element {
     setMenuIndex(0)
   }
   const handleEnter = (value: string): void => {
-    const selected = menuItems()[menuIndex()]
-    const isExactSlashCommand = slashOpen() && selected?.label === value.trim()
-    if (menuOpen() && !isExactSlashCommand && completeMenu()) return
+    // The menu is open whenever the user is still typing the command token
+    // (no space after the slash). If they pressed Enter while the menu is
+    // open, the intent is to complete the highlighted entry, not to submit —
+    // even when the typed text already matches a command exactly (e.g.
+    // typing `/theme` and pressing Enter should complete `/theme ` into the
+    // input, not submit it).
+    if (menuOpen() && completeMenu()) return
     handleSubmit(value)
   }
   useKeyboard((key: KeyEvent) => {
