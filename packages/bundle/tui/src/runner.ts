@@ -631,11 +631,20 @@ export async function runTui(): Promise<void> {
     // /permission /plan) so every registered command is palette-reachable.
     // The registry is optional: a composition without dsh-commands mounted
     // shows only the TUI-local entries.
+    // Build the command palette. The TUI-local entries own the renderer or
+    // store and use `/`-prefixed labels so the slash menu's completion
+    // produces a runnable command line (onSubmit's `/model`/`/theme`/`/mode`
+    // branches match the label directly). The rest come from the command
+    // registry (`ctx.commands.list(agent)` → /compact /feedback /goal
+    // /permission /plan) so every registered command is palette-reachable.
+    // The registry is optional: a composition without dsh-commands mounted
+    // shows only the TUI-local entries.
     const localCommands: CommandEntry[] = [
-      { label: 'Switch model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
-      { label: 'Switch theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
-      { label: 'Switch mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
-      { label: 'Refresh sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
+      { label: '/model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
+      { label: '/theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
+      { label: '/mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
+      { label: '/sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
+      { label: '/clear', description: 'new session on current mode', run: () => { void onSelectSession('') } },
     ]
     const registryCommands: CommandEntry[] = commands === undefined ? [] : commands.list(agent).map(d => ({
       label: `/${d.name}`,

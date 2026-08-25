@@ -287,13 +287,11 @@ export function Prompt(props: PromptProps): JSX.Element {
   const menuItems = createMemo<readonly { label: string; insert: string }[]>(() => {
     if (slashOpen() && props.commands !== undefined) {
       const t = slashToken(liveValue())
-      // Only registry commands (label starts with `/`) belong in the slash
-      // menu. Local palette entries (Switch theme, Switch model, etc.) are
-      // NOT slash commands — they appear only in the Ctrl+P command palette.
-      // If a local entry's label were inserted as the menu completion, it
-      // would replace the typed `/cmd` with e.g. "Switch theme " which the
-      // runner's onSubmit cannot match, making every slash command a no-op.
-      const all = props.commands.filter(c => c.label.startsWith('/'))
+      // The menu navigates exactly the list <SlashMenu> renders: all palette
+      // entries. Local commands carry `/`-prefixed labels (`/model`, `/theme`
+      // …) so a completed insertion is a runnable command line — filtering
+      // here would desync the highlight index from the rendered list.
+      const all = props.commands
       const matches = t === '' ? all : all.filter(c => c.label.toLowerCase().includes(t))
       return (matches.length > 8 ? matches.slice(0, 8) : matches).map(c => ({ label: c.label, insert: `${c.label} ` }))
     }
