@@ -16,6 +16,7 @@ import { type JSX } from '@opentui/solid'
 import { createMemo, createSignal, For } from 'solid-js'
 import type { KeyEvent } from '@opentui/core'
 import { CHROME, ROLE_COLORS } from '../theme.js'
+import { t } from '../i18n.js'
 
 /** One command-palette entry. */
 export interface CommandEntry {
@@ -58,7 +59,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
     if (!props.open) return undefined
     return (
       <box position="absolute" top={2} left={2} right={2} zIndex={3000} backgroundColor={CHROME.bgPanel} border borderColor={CHROME.borderActive} borderStyle="rounded" paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1} onKeyDown={onKey}>
-        <text fg={ROLE_COLORS.assistant}><b>command palette</b></text>
+        <text fg={ROLE_COLORS.assistant}><b>{t('palette.title')}</b></text>
         <For each={props.commands}>
           {(cmd, index) => {
             const isActive = createMemo(() => index() === selected())

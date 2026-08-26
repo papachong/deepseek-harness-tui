@@ -36,6 +36,7 @@ import { dryRunCapture } from './capture.ts'
 import { createTuiStore, type TuiStore, type SessionListItem } from './view/store.js'
 import { createTuiRenderer, renderApp, dismissConsoleOverlay } from './view/renderer.js'
 import { theme, themeNames, switchTheme } from './view/theme.js'
+import { setLocale, locale, t } from './view/i18n.js'
 import { nextWorkMode, type WorkMode } from './view/modes.js'
 import type { CommandEntry } from './view/components/command-palette.js'
 import type { MentionEntry } from './view/components/mention-menu.js'
@@ -502,6 +503,21 @@ export async function runTui(): Promise<void> {
         }
         return
       }
+      // /lang <en|zh>: swap the active UI locale. No agent round-trip; the
+      // SolidJS signal re-renders every component reading t(...). With no arg,
+      // list available locales and the active one.
+      if (cmd.startsWith('/lang')) {
+        const arg = trimmed.slice('/lang'.length).trim().toLowerCase()
+        if (arg === '') {
+          process.stdout.write(`${t('lang.listing', { locale: locale() })}\n`)
+        } else if (arg === 'en' || arg === 'zh') {
+          setLocale(arg)
+          process.stdout.write(`${t('lang.switched', { locale: arg })}\n`)
+        } else {
+          process.stdout.write(`${t('lang.unknown', { arg })}\n`)
+        }
+        return
+      }
       // /sessions: refresh the sidebar session list.
       if (cmd === '/sessions') { void refreshSessions(); return }
       // /clear: start a fresh session on the current work mode. Disposes the
@@ -642,6 +658,7 @@ export async function runTui(): Promise<void> {
     const localCommands: CommandEntry[] = [
       { label: '/model', description: 'change provider/model', run: () => { process.stdout.write('use /model <provider>/<model>\n') } },
       { label: '/theme', description: 'change color palette', run: () => { process.stdout.write(`themes: ${themeNames().join(', ')}\n`) } },
+      { label: 'Switch language', description: 'en / zh UI locale', run: () => { process.stdout.write('use /lang <en|zh>\n') } },
       { label: '/mode', description: 'standard/PTC/minimal/cordis', run: () => { store.setMode(nextWorkMode(store.mode())) } },
       { label: '/sessions', description: 'reload sidebar list', run: () => { void refreshSessions() } },
       { label: '/clear', description: 'new session on current mode', run: () => { void onSelectSession('') } },

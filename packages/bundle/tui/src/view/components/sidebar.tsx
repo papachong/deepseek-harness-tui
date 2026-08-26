@@ -19,6 +19,7 @@ import { type JSX } from '@opentui/solid'
 import { For, createMemo, createSignal } from 'solid-js'
 import { useTerminalDimensions } from '@opentui/solid'
 import { CHROME, ROLE_COLORS, STATUS_COLORS } from '../theme.js'
+import { t } from '../i18n.js'
 import type { TuiStore } from '../store.js'
 
 /** The sidebar width in columns when inline. */
@@ -130,7 +131,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         onKeyDown={onKey}
       >
         <box flexDirection="row">
-          <text fg={CHROME.textMuted}>sessions</text>
+          <text fg={CHROME.textMuted}>{t('sidebar.sessions')}</text>
           <box flexGrow={1} />
           <text fg={CHROME.textMuted}>{list().length}</text>
         </box>

@@ -22,6 +22,7 @@ import { type JSX, useTerminalDimensions } from '@opentui/solid'
 import { createMemo } from 'solid-js'
 import { CHROME } from '../theme.js'
 import { workMode } from '../modes.js'
+import { t } from '../i18n.js'
 import { Logo } from '../logo.js'
 import type { TuiStore } from '../store.js'
 import { Prompt } from './prompt.js'
@@ -84,8 +85,8 @@ export function Home(props: HomeProps): JSX.Element {
         <box height={1} minHeight={0} flexShrink={1} />
         {/* Active work-mode tagline and badge so Tab cycling is legible pre-session. */}
         <box flexShrink={0} flexDirection="row" gap={1} alignItems="center">
-          <text fg={CHROME.borderActive} attributes={1}>[{modeDef()?.name ?? 'standard'}]</text>
-          <text fg={CHROME.textMuted}>{modeDef()?.description ?? ''}</text>
+          <text fg={CHROME.borderActive} attributes={1}>[{modeDef()?.name() ?? 'standard'}]</text>
+          <text fg={CHROME.textMuted}>{modeDef()?.description() ?? ''}</text>
         </box>
         <box height={1} minHeight={0} flexShrink={1} />
         {/* Hero prompt: full width of the centered column, capped at
@@ -132,9 +133,9 @@ export function Home(props: HomeProps): JSX.Element {
       <box width="100%" flexShrink={0} flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2} paddingBottom={1} paddingTop={1}>
         <text fg={CHROME.textMuted}>{process.cwd()}</text>
         <box flexDirection="row" gap={2}>
-          <text fg={CHROME.textMuted}>{modeDef()?.name ?? 'standard'}</text>
+          <text fg={CHROME.textMuted}>{modeDef()?.name() ?? 'standard'}</text>
           {modelLabel() === '' ? undefined : <text fg={CHROME.textMuted}>{modelLabel()}</text>}
-          <text fg={CHROME.textMuted}>tab cycle · ctrl+p palette · /help</text>
+          <text fg={CHROME.textMuted}>{t('home.footer')}</text>
         </box>
       </box>
     </box>

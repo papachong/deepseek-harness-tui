@@ -45,3 +45,4 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 - **No `--resume`** — the bin creates a fresh session per run; there is no JSONL reconstruction of a prior session. `--resume` is Phase 3.
 - **Answerers are line-mode and block the turn** — the approval/ask-user answerers read a full line via the single-owner line dispatcher; under warp session-share, `SharedSessionWriteToLongRunningCommands` may gate this and require a non-blocking answerer (see the [analysis note](../../../.agents/notes/proposed/architecture/2026-08-18-tui-terminal-product-analysis.md) §8).
 - **Capture is dry-run only** — the SessionEnd hook logs a capture intent to stderr; the real `sf memory capture` is deferred until the user confirms (Phase 3 risk #4: must reuse ai-cli's redaction/idempotence).
+- **Locale is not persisted across runs** — `detectLocale` reads the system env each launch; `/lang` is session-scoped. Persisting the choice awaits a `dsh-tui` config block.

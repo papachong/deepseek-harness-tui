@@ -26,6 +26,7 @@ import { createMemo, createSignal, createEffect, onCleanup, type Accessor } from
 import type { InputRenderable, KeyEvent } from '@opentui/core'
 import { CHROME, STATUS_COLORS } from '../theme.js'
 import { workMode } from '../modes.js'
+import { t } from '../i18n.js'
 import type { TuiStore } from '../store.js'
 import { SlashMenu, slashToken } from './slash-menu.js'
 import { MentionMenu } from './mention-menu.js'
@@ -83,13 +84,13 @@ export function Prompt(props: PromptProps): JSX.Element {
     isAnswer() ? STATUS_COLORS.pending : isPlan() ? '#c678dd' : CHROME.border,
   )
   const placeholder = createMemo(() =>
-    isAnswer() ? 'answer> ' : isPlan() ? 'plan> ' : 'task> ',
+    isAnswer() ? t('prompt.answer') : isPlan() ? t('prompt.plan') : t('prompt.task'),
   ) as Accessor<string>
   // Meta row (opencode prompt:1451-1465): the active work-mode name and the
   // model id render under the input so the hero and chat prompts both
   // surface the composition state without a separate status bar.
   const modeName = createMemo(() =>
-    workMode(props.store.state.mode)?.name ?? props.store.state.mode,
+    workMode(props.store.state.mode)?.name() ?? props.store.state.mode,
   )
   const modelLabel = createMemo(() => {
     const m = props.store.model()
