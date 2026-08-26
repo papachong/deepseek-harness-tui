@@ -1,9 +1,9 @@
-# Publish the dsh release sequence to npm. This workflow is manual-only
-# (workflow_dispatch) and intentionally does not listen to pull_request or push:
-# publication must always be an explicit, reviewed act from a dsh-v* tag, and it
-# must never appear as a PR check. It repacks the current tree before publishing
-# so the bytes uploaded are exactly what this dispatch produced.
-name: Release publish (dsh)
+# Publish @ruhooai/dsh-tui to npm. This workflow is manual-only
+# (workflow_dispatch): publication must always be an explicit, reviewed act.
+# Unlike the full dsh family publish, this publishes ONLY the TUI package
+# (@ruhooai/dsh-tui). The other packages in the repo stay under @deepseek-ai
+# and are published by their own upstream release lane.
+name: Release publish (dsh-tui)
 
 on:
   workflow_dispatch:
@@ -17,10 +17,9 @@ env:
 
 jobs:
   pack:
-    name: Pack npm tarballs
+    name: Pack @ruhooai/dsh-tui tarball
     runs-on: ubuntu-24.04
     steps:
-      # Complete history: the release scripts read tags.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -33,6 +32,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      # Bun builds the dsh-tui OpenTUI view layer (src/view/*.tsx → lib/view/*.js)
+      # via Bun.build + @opentui/solid/bun-plugin. tsdown cannot compile Solid
+      # JSX, and the @opentui FFI is Bun-only.
+      - uses: oven-sh/setup-bun@v2
 
       - name: Configure pnpm store path
         id: pnpm-store
@@ -52,40 +56,25 @@ jobs:
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
 
-      - name: Verify release version
-        env:
-          RELEASE_PUBLISH: 'true'
-        run: pnpm run release:verify --family dsh
+      - name: Build lib (tsc + tsdown)
+        run: pnpm run build:lib:host
 
-      - name: Build
-        run: pnpm run build:official
+      - name: Build view (Bun.build Solid JSX)
+        working-directory: packages/bundle/tui
+        run: bun scripts/build-view.ts
 
-      - name: Pack release tarballs
-        run: pnpm run release:pack --family dsh --out dist/npm
+      - name: Verify published artifacts
+        working-directory: packages/bundle/tui
+        run: tsx scripts/verify-published-artifacts.ts
 
-      # The harness packages declare the vendored framework as a peer, and this
-      # verification must not depend on the registry already carrying matching
-      # versions — one pull request may bump both families before either
-      # publishes — so it installs that family's pack output too. Only dist/npm
-      # is published.
-      - name: Pack the vendored framework for verification
-        run: pnpm run release:pack --family vendor --out dist/npm-vendor
-
-      # dsh-sandbox-local declares the Landlock entry as a runtime dependency, so
-      # the verification needs its tarball. Its platform packages stay out: they
-      # are optional, and building them needs a musl toolchain per architecture.
-      - name: Pack the Landlock entry for verification
-        run: |
-          pnpm --dir native/landlock-run run build:ts
-          pnpm --dir native/landlock-run/packages/entry pack --pack-destination "$PWD/dist/npm-landlock"
-
-      - name: Verify packed install
-        run: pnpm run release:verify-packed-install --family dsh --from dist/npm --from dist/npm-vendor --from dist/npm-landlock
+      - name: Pack tarball
+        working-directory: packages/bundle/tui
+        run: pnpm pack --pack-destination "$PWD/../../dist/npm"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-npm-tarballs
-          path: dist/npm/*
+          name: ruhooai-dsh-tui-tarball
+          path: packages/dist/npm/*.tgz
           if-no-files-found: error
           retention-days: 7
 
@@ -93,17 +82,13 @@ jobs:
     name: Publish to npm
     needs: pack
     runs-on: ubuntu-24.04
-    # Required reviewers and the allowed tags live on the environment; this is
-    # the only job in the sequence that can write to the registry.
     environment: npm-publish
     concurrency:
-      group: Release-publish
+      group: Release-publish-tui
       cancel-in-progress: false
     permissions:
       contents: read
     steps:
-      # Checkout and install carry the release scripts only. There is no build
-      # step: publication uploads the bytes the pack job produced.
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -122,10 +107,10 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: dsh-npm-tarballs
+          name: ruhooai-dsh-tui-tarball
           path: dist/npm
 
-      - name: Publish tarballs
+      - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm run release:publish --family dsh --from dist/npm
+        run: npm publish dist/npm/*.tgz --access public
