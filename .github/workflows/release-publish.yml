@@ -65,7 +65,7 @@ jobs:
 
       - name: Verify published artifacts
         working-directory: packages/bundle/tui
-        run: tsx scripts/verify-published-artifacts.ts
+        run: pnpm exec tsx scripts/verify-published-artifacts.ts
 
       - name: Pack tarball
         working-directory: packages/bundle/tui
