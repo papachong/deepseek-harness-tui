@@ -5,7 +5,7 @@
  * `sf memory capture` call is deferred until the user confirms (the capture
  * must reuse ai-cli's redaction/queue/replay, not bypass it).
  *
- * @module @deepseek-ai/dsh-tui/capture
+ * @module @ruhooai/dsh-tui/capture
  */
 
 import type { Session } from '@deepseek-ai/dsh-session'

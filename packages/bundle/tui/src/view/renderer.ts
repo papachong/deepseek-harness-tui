@@ -11,7 +11,7 @@
  * `@opentui/core-*` package matching the current `process.platform` /
  * `process.arch`, with a musl suffix on linux when `OPENTUI_LIBC=musl`.
  *
- * @module @deepseek-ai/dsh-tui/view/renderer
+ * @module @ruhooai/dsh-tui/view/renderer
  */
 
 import { existsSync, readdirSync } from 'node:fs'
@@ -55,20 +55,26 @@ function findNativeLibInStore(
   const fileName = NATIVE_FILE_NAMES[platform]
   if (fileName === undefined) return undefined
   const libcSuffix = platform === 'linux' && musl ? '-musl' : ''
-  const pkgPrefix = `@opentui+core-${platform}-${arch}${libcSuffix}@`
+  const pkgName = `@opentui/core-${platform}-${arch}${libcSuffix}`
   let dir = startDir
   for (let i = 0; i < 20; i++) {
     const nodeModules = join(dir, 'node_modules')
     if (existsSync(nodeModules)) {
+      // 1. Plain node_modules (standalone binary layout): the platform package
+      //    sits at node_modules/@opentui/core-<platform>-<arch>/<file>.
+      const plainPath = join(nodeModules, pkgName, fileName)
+      if (existsSync(plainPath)) return plainPath
+      // 2. pnpm store layout (dev/CI): node_modules/.pnpm/@opentui+core-…
       const pnpmDir = join(nodeModules, '.pnpm')
       if (existsSync(pnpmDir)) {
         try {
           const entries = readdirSync(pnpmDir)
+          const pkgPrefix = `@opentui+core-${platform}-${arch}${libcSuffix}@`
           const match = entries.find(e => e.startsWith(pkgPrefix))
           if (match !== undefined) {
             const libPath = join(
               pnpmDir, match,
-              'node_modules', `@opentui/core-${platform}-${arch}${libcSuffix}`,
+              'node_modules', pkgName,
               fileName,
             )
             if (existsSync(libPath)) return libPath
@@ -103,16 +109,21 @@ export function findSo(): string {
     throw new Error(`OpenTUI is not supported on arch: ${arch}`)
   }
   const musl = process.env['OPENTUI_LIBC'] === 'musl'
+  // In a `bun build --compile` binary, `import.meta.url` resolves to the
+  // virtual `/$bunfs/root/<bin>` path, so the module-dir walk finds nothing.
+  // Fall back to `process.cwd()` — the standalone binary ships the native
+  // .so in a `node_modules/@opentui/core-<platform>-<arch>/` tree beside the
+  // binary, and the user launches from that directory (or sets CWD).
   const here = fileURLToPath(import.meta.url)
-  const startDir = resolve(here, '..')
-  const libPath = findNativeLibInStore(startDir, platform, arch, musl)
-  if (libPath === undefined) {
-    throw new Error(
-      `OpenTUI native library not found for ${platform}-${arch}${musl ? '-musl' : ''}. ` +
-      'Install the matching @opentui/core-* platform package.',
-    )
+  const candidates = [resolve(here, '..'), process.cwd()]
+  for (const startDir of candidates) {
+    const libPath = findNativeLibInStore(startDir, platform, arch, musl)
+    if (libPath !== undefined) return libPath
   }
-  return libPath
+  throw new Error(
+    `OpenTUI native library not found for ${platform}-${arch}${musl ? '-musl' : ''}. ` +
+    'Install the matching @opentui/core-* platform package.',
+  )
 }
 
 /**

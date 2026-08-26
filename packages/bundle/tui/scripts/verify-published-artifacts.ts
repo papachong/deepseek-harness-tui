@@ -14,7 +14,7 @@ import { existsSync, statSync } from 'node:fs'
  *
  * Run by the `prepublishOnly` lifecycle hook.
  *
- * @module @deepseek-ai/dsh-tui/scripts/verify-published-artifacts
+ * @module @ruhooai/dsh-tui/scripts/verify-published-artifacts
  * @private
  */
 

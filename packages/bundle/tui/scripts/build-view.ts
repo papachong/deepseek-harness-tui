@@ -8,7 +8,7 @@
 // lib/types/view/ and bundled by tsdown; only the .tsx files go here.
 //
 // Run via `bun scripts/build-view.ts` (invoked by the root build chain).
-// @module @deepseek-ai/dsh-tui/scripts/build-view
+// @module @ruhooai/dsh-tui/scripts/build-view
 
 import { build } from 'bun'
 import { createSolidTransformPlugin } from '@opentui/solid/bun-plugin'

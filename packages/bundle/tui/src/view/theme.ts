@@ -9,7 +9,7 @@
  * named colors + `RGBA` objects; it does NOT accept `rgb(...)` strings — those
  * silently fall back to magenta).
  *
- * @module @deepseek-ai/dsh-tui/view/theme
+ * @module @ruhooai/dsh-tui/view/theme
  */
 
 import { RGBA, SyntaxStyle } from '@opentui/core'

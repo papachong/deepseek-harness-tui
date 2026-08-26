@@ -18,7 +18,7 @@
  * OpenTUI Solid reconciler emits a stray empty text node for `<Show>`'s falsy
  * branch that orphans under a non-text parent.
  *
- * @module @deepseek-ai/dsh-tui/view/components/prompt
+ * @module @ruhooai/dsh-tui/view/components/prompt
  */
 
 import { type JSX, useKeyboard } from '@opentui/solid'

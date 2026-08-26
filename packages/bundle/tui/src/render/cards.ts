@@ -6,7 +6,7 @@
  * `presentCall`/`presentResult` itself (the host computes render intent; the
  * in-process TUI reads `tool/call`+`tool/result` events directly).
  *
- * @module @deepseek-ai/dsh-tui/render/cards
+ * @module @ruhooai/dsh-tui/render/cards
  */
 
 import type {

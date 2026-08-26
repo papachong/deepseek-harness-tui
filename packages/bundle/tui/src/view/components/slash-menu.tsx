@@ -12,7 +12,7 @@
  * NOTE: uses memo-conditionals instead of `<Show>` — the OpenTUI Solid
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch.
  *
- * @module @deepseek-ai/dsh-tui/view/components/slash-menu
+ * @module @ruhooai/dsh-tui/view/components/slash-menu
  */
 
 import { type JSX } from '@opentui/solid'

@@ -15,7 +15,7 @@
  * `bgElement`, a left `SplitBorder` vertical rule, and a meta row under the
  * textarea (mode name + model id). No sidebar, no status bar.
  *
- * @module @deepseek-ai/dsh-tui/view/components/home
+ * @module @ruhooai/dsh-tui/view/components/home
  */
 
 import { type JSX, useTerminalDimensions } from '@opentui/solid'

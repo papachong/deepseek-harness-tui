@@ -9,7 +9,7 @@
  * answer over SSE is wired here, the in-process answerer path stays the
  * default for local mode.
  *
- * @module @deepseek-ai/dsh-tui/transport/event-source
+ * @module @ruhooai/dsh-tui/transport/event-source
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'

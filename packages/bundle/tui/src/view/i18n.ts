@@ -5,7 +5,7 @@
  * `/lang` command is the runtime override. Locale is detected from the system
  * env at startup (LANG / LC_ALL / LC_MESSAGES); `/lang` overrides it.
  *
- * @module @deepseek-ai/dsh-tui/view/i18n
+ * @module @ruhooai/dsh-tui/view/i18n
  */
 
 import { createSignal } from 'solid-js'

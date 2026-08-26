@@ -8,7 +8,7 @@
  * the workflow script that orchestrates the build cannot use them, but this
  * module never runs under that script.
  *
- * @module @deepseek-ai/dsh-tui/view/store
+ * @module @ruhooai/dsh-tui/view/store
  */
 
 import { batch, createSignal } from 'solid-js'

@@ -13,7 +13,7 @@
  * `<Prompt>` switches to answer mode and routes the submitted line via
  * `resolveAnswer()`.
  *
- * @module @deepseek-ai/dsh-tui/answerers
+ * @module @ruhooai/dsh-tui/answerers
  */
 
 import type { Context } from '@deepseek-ai/cordis'

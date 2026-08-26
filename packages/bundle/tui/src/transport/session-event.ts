@@ -5,7 +5,7 @@
  * `ctx.on('session/event')`; the remote mode attaches to a
  * {@link BffSseTransport}. Both feed the same render path.
  *
- * @module @deepseek-ai/dsh-tui/transport/session-event
+ * @module @ruhooai/dsh-tui/transport/session-event
  */
 
 import type { Context } from '@deepseek-ai/cordis'

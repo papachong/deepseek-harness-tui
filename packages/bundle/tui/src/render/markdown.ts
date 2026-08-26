@@ -6,7 +6,7 @@
  * {@link IncrementalMarkdownParser} over the GFM grammar for O(1)/chunk
  * streaming folding.
  *
- * @module @deepseek-ai/dsh-tui/render/markdown
+ * @module @ruhooai/dsh-tui/render/markdown
  */
 
 import type { Root } from 'mdast'

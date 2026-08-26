@@ -12,7 +12,7 @@
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch that
  * orphans under a non-text parent.
  *
- * @module @deepseek-ai/dsh-tui/view/components/sidebar
+ * @module @ruhooai/dsh-tui/view/components/sidebar
  */
 
 import { type JSX } from '@opentui/solid'

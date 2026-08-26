@@ -14,7 +14,7 @@
  *              T    █    U  █__█  I  █
  *              T    ▀    U  ▀▀▀▀  I  ▀
  *
- * @module @deepseek-ai/dsh-tui/view/logo
+ * @module @ruhooai/dsh-tui/view/logo
  */
 
 import { type JSX } from '@opentui/solid'

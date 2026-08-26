@@ -5,7 +5,7 @@
  * instead of React `CSSProperties`. Consumed by the TUI render layer when a
  * tool result carries ANSI (e.g. bash output).
  *
- * @module @deepseek-ai/dsh-tui/render/ansi
+ * @module @ruhooai/dsh-tui/render/ansi
  */
 
 import Anser from 'anser'

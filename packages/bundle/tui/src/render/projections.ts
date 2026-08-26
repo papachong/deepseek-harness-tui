@@ -3,7 +3,7 @@
  * (from `Session.surface` / `todo/write` events) to terminal sidebars.
  * Phase 2 ships a compact line-list; a scrollable panel is deferred.
  *
- * @module @deepseek-ai/dsh-tui/render/projections
+ * @module @ruhooai/dsh-tui/render/projections
  */
 
 import type { TodoItem } from '@deepseek-ai/dsh-session'

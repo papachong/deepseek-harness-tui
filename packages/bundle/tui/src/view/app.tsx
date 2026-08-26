@@ -10,7 +10,7 @@
  * assistant chunks, and tool calls interleave in true time order — not two
  * separate `<For>` blocks stacked end-to-end.
  *
- * @module @deepseek-ai/dsh-tui/view/app
+ * @module @ruhooai/dsh-tui/view/app
  */
 
 import { type JSX, useKeyboard } from '@opentui/solid'

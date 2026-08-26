@@ -7,7 +7,7 @@
  * composition swap happens in the runner; this module owns only the
  * vocabulary + cycling order the view layer reads.
  *
- * @module @deepseek-ai/dsh-tui/view/modes
+ * @module @ruhooai/dsh-tui/view/modes
  */
 
 import { t } from './i18n.js'

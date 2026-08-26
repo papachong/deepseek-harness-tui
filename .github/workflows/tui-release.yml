@@ -1,0 +1,118 @@
+# Build standalone dsh-tui binaries for each platform via `bun build --compile`.
+# The binary embeds the Bun runtime + all JS; the @opentui/core native library
+# (.so/.dylib/.dll) ships beside it as a separate file in the release tarball.
+#
+# Triggered manually (workflow_dispatch) from a tag, or on push to master when
+# the TUI package changes. Produces 6 platform tarballs as GitHub Release
+# artifacts.
+name: TUI Standalone Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. tui-v0.1.0)'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'tui-v*'
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            runner: ubuntu-24.04
+            arch: x64
+          - target: bun-linux-arm64
+            runner: ubuntu-24.04
+            arch: arm64
+          - target: bun-darwin-x64
+            runner: macos-13
+            arch: x64
+          - target: bun-darwin-arm64
+            runner: macos-14
+            arch: arm64
+          - target: bun-windows-x64
+            runner: windows-2022
+            arch: x64
+          - target: bun-windows-arm64
+            runner: windows-11-arm
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build lib (tsc + tsdown)
+        run: pnpm run build:lib:host
+
+      - name: Build view (Bun.build Solid JSX)
+        working-directory: packages/bundle/tui
+        run: bun scripts/build-view.ts
+
+      - name: Build standalone binary
+        working-directory: packages/bundle/tui
+        run: bun scripts/build-standalone.ts
+
+      - name: Package tarball
+        working-directory: packages/bundle/tui/dist/${{ matrix.target }}
+        run: |
+          tar -czf ../../../dsh-tui-${{ matrix.target }}.tar.gz *
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-tui-${{ matrix.target }}
+          path: packages/bundle/tui/dsh-tui-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/tui-v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dsh-tui-*
+          merge-multiple: false
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DSH TUI ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/dsh-tui-*/*

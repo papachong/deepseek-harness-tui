@@ -9,7 +9,7 @@
  * NOTE: uses memo-conditionals instead of `<Show>` — the OpenTUI Solid
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch.
  *
- * @module @deepseek-ai/dsh-tui/view/components/command-palette
+ * @module @ruhooai/dsh-tui/view/components/command-palette
  */
 
 import { type JSX } from '@opentui/solid'

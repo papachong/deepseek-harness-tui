@@ -1,4 +1,4 @@
-# @deepseek-ai/dsh-tui
+# @ruhooai/dsh-tui
 
 English | [中文](README.zh.md)
 

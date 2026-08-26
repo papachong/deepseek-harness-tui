@@ -15,7 +15,7 @@
  * reconciler emits a stray empty text node for `<Show>`'s falsy branch that
  * orphans under a non-text parent (`<box>`/`<scrollbox>`).
  *
- * @module @deepseek-ai/dsh-tui/view/components/message
+ * @module @ruhooai/dsh-tui/view/components/message
  */
 
 import { type JSX } from '@opentui/solid'

@@ -6,7 +6,7 @@
  * parser freezes all but the trailing blocks and re-parses only the source
  * tail, so each source region is parsed O(1) times over the stream.
  *
- * @module @deepseek-ai/dsh-tui/render/markdown/incremental
+ * @module @ruhooai/dsh-tui/render/markdown/incremental
  */
 
 import type { Root, RootContent } from 'mdast'

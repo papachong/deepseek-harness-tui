@@ -10,7 +10,7 @@
  * exactly ONE consumer: a pending prompt reader (approval / ask-user) if any,
  * otherwise the task-line queue consumed by the REPL loop.
  *
- * @module @deepseek-ai/dsh-tui/input
+ * @module @ruhooai/dsh-tui/input
  */
 
 import { createInterface } from 'node:readline'

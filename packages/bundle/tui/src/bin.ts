@@ -9,7 +9,7 @@
  * function. Bun loads `.env` natively, so the call is redundant under Bun;
  * the guard below short-circuits it. The app-boot `loadEnv` itself is shared
  * and left untouched.
- * @module @deepseek-ai/dsh-tui/bin
+ * @module @ruhooai/dsh-tui/bin
  */
 
 // Bun lacks process.loadEnvFile; Bun loads .env natively, so the call inside

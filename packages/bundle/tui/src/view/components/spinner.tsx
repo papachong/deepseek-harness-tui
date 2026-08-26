@@ -5,7 +5,7 @@
  * braille frame set; `onCleanup` clears the timer when the spinner leaves the
  * tree (preventing leaks across re-renders).
  *
- * @module @deepseek-ai/dsh-tui/view/components/spinner
+ * @module @ruhooai/dsh-tui/view/components/spinner
  */
 
 import { type JSX } from '@opentui/solid'

@@ -4,7 +4,7 @@
  * single-turn) and extends the followup → whenIdle pair into a REPL loop.
  * Standalone bin: owns disposeAndExit (no `ctx.appExit`, unlike headless).
  *
- * @module @deepseek-ai/dsh-tui/runner
+ * @module @ruhooai/dsh-tui/runner
  */
 
 import { existsSync } from 'node:fs'
