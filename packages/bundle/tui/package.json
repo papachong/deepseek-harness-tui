@@ -1,7 +1,7 @@
 {
   "name": "@ruhooai/dsh-tui",
   "description": "The dsh terminal UI bundle: a multi-turn in-process TUI REPL over the agent spine with approval/ask-user answerers, no Host or browser layer",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.0-rc.9",
   "publishConfig": {
     "access": "public"
   },
